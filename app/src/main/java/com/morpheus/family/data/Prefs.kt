@@ -30,6 +30,13 @@ class Prefs(private val context: Context) {
         // Parent side: the roster of managed children and each child's schedule.
         val CHILDREN = stringPreferencesKey("children")
         fun childSchedule(id: String) = stringPreferencesKey("sched_$id")
+        fun childAppPolicy(id: String) = stringPreferencesKey("apppol_$id")
+
+        // Child side: this device's own app policy (synced from the parent).
+        val APP_POLICY = stringPreferencesKey("app_policy")
+
+        // Parent side: optional PIN (stored hashed) gating the parent UI.
+        val PARENT_PIN = stringPreferencesKey("parent_pin")
     }
 
     val modeFlow: Flow<AppMode> = context.dataStore.data.map { p ->
@@ -46,6 +53,7 @@ class Prefs(private val context: Context) {
 
     suspend fun mode(): AppMode = modeFlow.first()
     suspend fun schedule(): Schedule = scheduleFlow.first()
+    suspend fun pairedId(): String? = pairedIdFlow.first()
 
     suspend fun setMode(mode: AppMode) =
         context.dataStore.edit { it[Keys.MODE] = mode.name }
@@ -66,6 +74,25 @@ class Prefs(private val context: Context) {
     suspend fun lastRelease(): Long = lastReleaseFlow.first()
     suspend fun setLastRelease(value: Long) =
         context.dataStore.edit { it[Keys.LAST_RELEASE] = value }
+
+    // Child side: this device's own app policy.
+    val appPolicyFlow: Flow<AppPolicy> = context.dataStore.data.map { AppPolicy.decode(it[Keys.APP_POLICY]) }
+    suspend fun appPolicy(): AppPolicy = appPolicyFlow.first()
+    suspend fun setAppPolicy(policy: AppPolicy) =
+        context.dataStore.edit { it[Keys.APP_POLICY] = AppPolicy.encode(policy) }
+
+    // Parent side: per-child app policy.
+    fun childAppPolicyFlow(id: String): Flow<AppPolicy> =
+        context.dataStore.data.map { AppPolicy.decode(it[Keys.childAppPolicy(id)]) }
+    suspend fun childAppPolicy(id: String): AppPolicy = childAppPolicyFlow(id).first()
+    suspend fun setChildAppPolicy(id: String, policy: AppPolicy) =
+        context.dataStore.edit { it[Keys.childAppPolicy(id)] = AppPolicy.encode(policy) }
+
+    // Parent PIN (hashed). Empty flow value = no PIN set.
+    val parentPinFlow: Flow<String?> = context.dataStore.data.map { it[Keys.PARENT_PIN] }
+    suspend fun setParentPin(hash: String?) = context.dataStore.edit {
+        if (hash == null) it.remove(Keys.PARENT_PIN) else it[Keys.PARENT_PIN] = hash
+    }
 
     // ---- Parent side: multiple managed children -------------------------------
 

@@ -6,35 +6,60 @@ import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
+import com.morpheus.family.admin.DeviceRestrictionsManager
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
+import com.morpheus.family.enforcement.AppEnforcer
 import com.morpheus.family.receiver.ScheduleAlarmReceiver
+import com.morpheus.family.remote.RemoteRepository
+import com.morpheus.family.time.TrustedTimeProvider
 import com.morpheus.family.vpn.BlockingVpnService
 import kotlinx.coroutines.runBlocking
 
 /**
- * The brain of the child-side enforcement. Given the current [Schedule] it
- * turns the blocking VPN on or off, then arms an exact alarm for the next moment
- * the decision will change — so enforcement is event-driven and battery-cheap
- * rather than a busy poll.
+ * The brain of the child-side enforcement. Uses [TrustedTimeProvider] (not the
+ * tamperable system clock) to decide whether to block, applies the internet
+ * schedule, per-app rules and device restrictions, then arms an exact alarm for
+ * the next boundary. Fails closed: if time can't be trusted or looks tampered,
+ * it blocks and alerts the parent.
  */
 object ScheduleEnforcer {
 
-    /** Re-evaluate the schedule and (un)block accordingly. Safe to call often. */
-    fun apply(context: Context, now: Long = System.currentTimeMillis()) {
-        val schedule = runBlocking { Prefs(context).schedule() }
-        val blocked = schedule.isBlockedAt(now)
+    /** Re-evaluate all policy and enforce. Safe to call often. */
+    fun apply(context: Context) {
+        val prefs = Prefs(context)
+        val schedule = runBlocking { prefs.schedule() }
+        val appPolicy = runBlocking { prefs.appPolicy() }
+
+        val t = TrustedTimeProvider.now()
+        var blocked = schedule.isBlockedAt(t.millis)
+
+        // Fail closed: a tampered wall clock means block now and warn the parent.
+        if (t.tampered) {
+            blocked = true
+            runCatching {
+                val pairId = runBlocking { prefs.pairedId() } ?: ""
+                RemoteRepository.reportAlert(context, pairId, "time_tamper", System.currentTimeMillis())
+            }
+        }
 
         if (blocked) {
-            if (vpnConsentGranted(context)) {
-                BlockingVpnService.block(context)
-            }
-            // If consent is not yet granted, the child UI surfaces the prompt.
+            if (vpnConsentGranted(context)) BlockingVpnService.block(context)
         } else {
             BlockingVpnService.unblock(context)
         }
 
-        armNextBoundary(context, schedule, now)
+        // Per-app blocking + device restrictions.
+        runCatching { AppEnforcer.apply(context, appPolicy, t.millis) }
+        runCatching { DeviceRestrictionsManager.apply(context, appPolicy.restrictions) }
+
+        armNextBoundary(context, schedule, t.millis)
+    }
+
+    /** Refresh trusted network time, then enforce. Call when online. */
+    suspend fun syncAndApply(context: Context) {
+        runCatching { TrustedTimeProvider.sync() }
+        apply(context)
     }
 
     /** True once the child has approved the VPN (or Device Owner pre-granted it). */

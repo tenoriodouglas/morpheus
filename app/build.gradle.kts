@@ -4,6 +4,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
     // Firebase (remote parent<->child commands) only applies when a
     // google-services.json is present, so open-source builds still work.
     id("com.google.gms.google-services") apply false
@@ -102,6 +103,9 @@ dependencies {
 
     // Coroutines.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // JSON serialization for the richer app-policy model (JVM-pure, unit-testable).
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     // Firebase (optional remote channel). Guarded at runtime by available().
     implementation(platform("com.google.firebase:firebase-bom:33.3.0"))

@@ -7,6 +7,7 @@ import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
+import com.morpheus.family.data.AppPolicy
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
 
@@ -48,6 +49,13 @@ object RemoteRepository {
         doc(pairId).set(data, SetOptions.merge())
     }
 
+    /** Parent: publish the per-app policy (rules, budgets, restrictions). */
+    fun pushAppPolicy(context: Context, pairId: String, appPolicy: AppPolicy) {
+        if (!available(context) || pairId.isBlank()) return
+        ensureSignedIn(context)
+        doc(pairId).set(mapOf("appPolicyJson" to AppPolicy.encode(appPolicy)), SetOptions.merge())
+    }
+
     /**
      * Parent: ask the child to release all protection so it can be uninstalled.
      * Stamped with [nowMillis] (pass System.currentTimeMillis()); the child acts
@@ -57,6 +65,29 @@ object RemoteRepository {
         if (!available(context) || pairId.isBlank()) return
         ensureSignedIn(context)
         doc(pairId).set(mapOf("releaseRequestedAt" to nowMillis), SetOptions.merge())
+    }
+
+    /** Child: report a tamper/alert event to the parent. */
+    fun reportAlert(context: Context, pairId: String, type: String, nowMillis: Long) {
+        if (!available(context) || pairId.isBlank()) return
+        ensureSignedIn(context)
+        doc(pairId).set(mapOf("alert" to type, "alertAt" to nowMillis), SetOptions.merge())
+    }
+
+    /** Parent: listen for the child's latest alert. */
+    fun listenAlert(
+        context: Context,
+        pairId: String,
+        onAlert: (type: String, at: Long) -> Unit,
+    ): ListenerRegistration? {
+        if (!available(context) || pairId.isBlank()) return null
+        ensureSignedIn(context)
+        return doc(pairId).addSnapshotListener { snap, err ->
+            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+            val type = snap.getString("alert") ?: return@addSnapshotListener
+            val at = snap.getLong("alertAt") ?: 0L
+            onAlert(type, at)
+        }
     }
 
     /**
@@ -73,8 +104,9 @@ object RemoteRepository {
         return doc(pairId).addSnapshotListener { snap, err ->
             if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
             val schedule = Prefs.decodeSchedule(snap.getString("scheduleJson"))
+            val appPolicy = AppPolicy.decode(snap.getString("appPolicyJson"))
             val releaseAt = snap.getLong("releaseRequestedAt") ?: 0L
-            onPolicy(RemotePolicy(schedule, releaseAt))
+            onPolicy(RemotePolicy(schedule, appPolicy, releaseAt))
         }
     }
 }

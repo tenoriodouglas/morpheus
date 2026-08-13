@@ -19,8 +19,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -28,22 +30,40 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.google.firebase.firestore.ListenerRegistration
 import com.morpheus.family.data.BlockWindow
 import com.morpheus.family.data.ChildRef
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
 import com.morpheus.family.remote.RemoteRepository
+import com.morpheus.family.util.Pin
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Parent device. A dashboard lists every managed child; selecting one opens its
- * own schedule editor. Each child has an independent policy pushed to its own
- * Firestore document, so one parent phone controls many child phones.
+ * own schedule + app-rules editor. Each child has an independent policy pushed to
+ * its own Firestore document, so one parent phone controls many child phones.
+ * If a parent PIN is set, it gates the whole screen.
  */
 @Composable
 fun ParentScreen(prefs: Prefs) {
+    val pinHash by prefs.parentPinFlow.collectAsState(initial = null)
+    var unlocked by remember { mutableStateOf(false) }
+
+    val hash = pinHash
+    if (hash != null && !unlocked) {
+        PinGate(expectedHash = hash, onUnlock = { unlocked = true })
+    } else {
+        ParentHome(prefs)
+    }
+}
+
+@Composable
+private fun ParentHome(prefs: Prefs) {
     var selectedChildId by remember { mutableStateOf<String?>(null) }
     val children by prefs.childrenFlow.collectAsState(initial = emptyList())
 
@@ -52,6 +72,34 @@ fun ParentScreen(prefs: Prefs) {
         ChildScheduleEditor(prefs, selected, onBack = { selectedChildId = null })
     } else {
         ParentDashboard(prefs, children, onOpenChild = { selectedChildId = it })
+    }
+}
+
+@Composable
+private fun PinGate(expectedHash: String, onUnlock: () -> Unit) {
+    var input by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Morpheus", style = MaterialTheme.typography.headlineMedium)
+        Text("Digite o PIN do responsável", modifier = Modifier.padding(vertical = 12.dp))
+        OutlinedTextField(
+            value = input,
+            onValueChange = { input = it.filter(Char::isDigit); error = false },
+            label = { Text("PIN") },
+            singleLine = true,
+            isError = error,
+        )
+        if (error) Text("PIN incorreto", color = MaterialTheme.colorScheme.error)
+        Button(
+            onClick = {
+                if (com.morpheus.family.util.Pin.hash(input) == expectedHash) onUnlock() else error = true
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+        ) { Text("Entrar") }
     }
 }
 
@@ -69,6 +117,20 @@ private fun ParentDashboard(
     var nameInput by remember { mutableStateOf("") }
     var confirmRelease by remember { mutableStateOf<ChildRef?>(null) }
 
+    // Listen for tamper alerts from each child (e.g. clock tampering).
+    val alerts = remember { mutableStateMapOf<String, Pair<String, Long>>() }
+    DisposableEffect(children, remoteAvailable) {
+        val regs = mutableListOf<ListenerRegistration>()
+        if (remoteAvailable) {
+            children.forEach { child ->
+                RemoteRepository.listenAlert(context, child.id) { type, at ->
+                    alerts[child.id] = type to at
+                }?.let { regs.add(it) }
+            }
+        }
+        onDispose { regs.forEach { it.remove() } }
+    }
+
     Column(
         modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -81,6 +143,25 @@ private fun ParentDashboard(
                     "Ative o Firebase (veja o README) para controlar os filhos à distância.",
                 style = MaterialTheme.typography.bodySmall,
             )
+        }
+
+        // Tamper alerts.
+        children.forEach { child ->
+            alerts[child.id]?.let { (type, at) ->
+                val fmt = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault())
+                val what = if (type == "time_tamper") "possível alteração da hora do sistema"
+                else "evento de segurança"
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            "⚠️ ${child.name}: $what",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Text("Detectado em ${fmt.format(Date(at))}", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
         }
 
         // Add a child.
@@ -119,6 +200,8 @@ private fun ParentDashboard(
                 ) { Text("Conectar filho") }
             }
         }
+
+        SecurityPinCard(prefs)
 
         Text(
             if (children.isEmpty()) "Nenhum filho conectado ainda."
@@ -179,6 +262,42 @@ private fun ParentDashboard(
                 TextButton(onClick = { confirmRelease = null }) { Text("Cancelar") }
             },
         )
+    }
+}
+
+@Composable
+private fun SecurityPinCard(prefs: Prefs) {
+    val scope = rememberCoroutineScope()
+    val pinHash by prefs.parentPinFlow.collectAsState(initial = null)
+    var input by remember { mutableStateOf("") }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("PIN do responsável", style = MaterialTheme.typography.titleMedium)
+            if (pinHash == null) {
+                Text(
+                    "Defina um PIN para proteger o acesso a este painel.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it.filter(Char::isDigit) },
+                    label = { Text("Novo PIN (mín. 4 dígitos)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = { if (input.length >= 4) scope.launch { prefs.setParentPin(Pin.hash(input)); input = "" } },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Definir PIN") }
+            } else {
+                Text("PIN ativo.", style = MaterialTheme.typography.bodyMedium)
+                OutlinedButton(
+                    onClick = { scope.launch { prefs.setParentPin(null) } },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Remover PIN") }
+            }
+        }
     }
 }
 
@@ -281,27 +400,7 @@ private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Uni
             onClick = { persist(current.copy(manualBlockUntil = 0L)) },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Cancelar bloqueio imediato") }
-    }
-}
 
-/** Simple +/- 15 minute stepper rendering a HH:MM label. */
-@Composable
-private fun TimeStepper(label: String, minutes: Int, onChange: (Int) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, modifier = Modifier.padding(end = 8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = { onChange((minutes - 15 + 1440) % 1440) }) { Text("−") }
-            Text(
-                "%02d:%02d".format(minutes / 60, minutes % 60),
-                style = MaterialTheme.typography.titleLarge,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-            OutlinedButton(onClick = { onChange((minutes + 15) % 1440) }) { Text("+") }
-        }
+        AppRulesEditor(prefs, child)
     }
 }

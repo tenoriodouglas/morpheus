@@ -110,6 +110,17 @@ fun ChildScreen(prefs: Prefs) {
         SetupButton("4. Desativar otimização de bateria") {
             runCatching { context.startActivity(batteryIntent()) }
         }
+        SetupButton("5. Ativar bloqueio de apps (Acessibilidade)") {
+            runCatching { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        }
+        SetupButton("6. Permitir acesso de uso (limites por app)") {
+            runCatching { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
+        }
+        Text(
+            "Passos 5 e 6 são necessários para bloquear apps específicos e aplicar " +
+                "limites diários (não precisam no modo Device Owner).",
+            style = MaterialTheme.typography.bodySmall,
+        )
 
         Spacer(Modifier.height(8.dp))
         Card(Modifier.fillMaxWidth()) {

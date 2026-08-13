@@ -43,6 +43,23 @@ C++/NDK só compensa para cálculo pesado (áudio/vídeo/jogos), o que não é o
    desinstalar nem desativar a administração. É o modo recomendado para controle
    parental sério (é como MDMs corporativos funcionam).
 
+## Recursos avançados (Fase 1)
+
+| Recurso | Como funciona |
+| --- | --- |
+| **Hora confiável (anti-burla)** | `time/TrustedTimeProvider` ancora na hora de rede (cabeçalho HTTPS `Date`) e avança com o relógio **monotônico** (`elapsedRealtime`), imune a mexer no relógio. Funciona online e offline. |
+| **Fail-closed + alerta** | Se a hora não é confiável ou parece adulterada, o app **bloqueia por padrão** e envia um **alerta ao painel do pai** (Firestore). |
+| **Bloqueio de apps por horário** | `enforcement/AppEnforcer` suspende apps (Device Owner: `setPackagesSuspended`) ou, sem owner, o `AppBlockAccessibilityService` cobre o app aberto com um aviso. |
+| **Limite diário por app / tempo total** | `enforcement/UsageTracker` lê o uso via `UsageStatsManager` e bloqueia ao atingir o limite. |
+| **Restrições Device Owner** | Bloquear instalar apps (`DISALLOW_INSTALL_APPS`) e travar alteração de hora (`DISALLOW_CONFIG_DATE_TIME` + hora automática). |
+| **Tempo bônus** | `bonusUntil` suspende os bloqueios por um período concedido pelo pai. |
+| **PIN do responsável** | Protege o acesso ao painel do pai (armazenado com hash SHA-256). |
+
+No **celular do filho**, os passos 5 e 6 do setup (Acessibilidade e Acesso de uso)
+habilitam o bloqueio de apps e os limites diários — não são necessários no modo
+Device Owner. No **painel do pai**, cada filho tem o editor de apps (escolher app,
+janela de bloqueio, limite diário), o tempo total de tela e as restrições.
+
 ## Fluxo de uso
 
 1. Instale o APK/AAB em cada celular.

@@ -15,6 +15,7 @@ import com.morpheus.family.data.Prefs
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.schedule.ScheduleEnforcer
 import com.morpheus.family.ui.MainActivity
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
@@ -44,7 +45,7 @@ class GuardianService : LifecycleService() {
                 policyListener?.remove()
                 policyListener = if (pairId.isNullOrBlank()) null else
                     RemoteRepository.listenPolicy(ctx, pairId) { policy ->
-                        lifecycleScope.launch {
+                        lifecycleScope.launch(Dispatchers.IO) {
                             if (policy.releaseRequestedAt > prefs.lastRelease()) {
                                 // Parent asked to remove protection: disable the
                                 // schedule, remember the request, then tear down.
@@ -53,6 +54,7 @@ class GuardianService : LifecycleService() {
                                 ProtectionManager.release(ctx)
                             } else {
                                 prefs.setSchedule(policy.schedule)
+                                prefs.setAppPolicy(policy.appPolicy)
                                 ScheduleEnforcer.apply(ctx)
                             }
                         }
@@ -63,7 +65,8 @@ class GuardianService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-        ScheduleEnforcer.apply(applicationContext)
+        // Refresh trusted time (network) then enforce.
+        lifecycleScope.launch(Dispatchers.IO) { ScheduleEnforcer.syncAndApply(applicationContext) }
         return START_STICKY
     }
 
