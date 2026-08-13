@@ -43,14 +43,76 @@ C++/NDK só compensa para cálculo pesado (áudio/vídeo/jogos), o que não é o
    desinstalar nem desativar a administração. É o modo recomendado para controle
    parental sério (é como MDMs corporativos funcionam).
 
+## Recursos avançados (Fase 1)
+
+| Recurso | Como funciona |
+| --- | --- |
+| **Hora confiável (anti-burla)** | `time/TrustedTimeProvider` ancora na hora de rede (cabeçalho HTTPS `Date`) e avança com o relógio **monotônico** (`elapsedRealtime`), imune a mexer no relógio. Funciona online e offline. |
+| **Fail-closed + alerta** | Se a hora não é confiável ou parece adulterada, o app **bloqueia por padrão** e envia um **alerta ao painel do pai** (Firestore). |
+| **Bloqueio de apps por horário** | `enforcement/AppEnforcer` suspende apps (Device Owner: `setPackagesSuspended`) ou, sem owner, o `AppBlockAccessibilityService` cobre o app aberto com um aviso. |
+| **Limite diário por app / tempo total** | `enforcement/UsageTracker` lê o uso via `UsageStatsManager` e bloqueia ao atingir o limite. |
+| **Restrições Device Owner** | Bloquear instalar apps (`DISALLOW_INSTALL_APPS`) e travar alteração de hora (`DISALLOW_CONFIG_DATE_TIME` + hora automática). |
+| **Tempo bônus** | `bonusUntil` suspende os bloqueios por um período concedido pelo pai. |
+| **PIN do responsável** | Protege o acesso ao painel do pai (armazenado com hash SHA-256). |
+
+No **celular do filho**, os passos 5 e 6 do setup (Acessibilidade e Acesso de uso)
+habilitam o bloqueio de apps e os limites diários — não são necessários no modo
+Device Owner. No **painel do pai**, cada filho tem o editor de apps (escolher app,
+janela de bloqueio, limite diário), o tempo total de tela e as restrições.
+
+## Recursos avançados (Fase 2)
+
+| Recurso | Como funciona |
+| --- | --- |
+| **Pedir mais tempo / SOS (filho)** | O filho pede mais tempo ou envia **SOS** (com localização). Chega ao painel do pai em tempo real; o pai **Aprova +30 min** (concede `allowUntil`/`bonusUntil`) ou nega. |
+| **Localização + mapa** | O filho envia a posição periodicamente; o pai vê a última localização e abre no mapa. |
+| **Geofence** | O pai define uma área (nome, lat/lng, raio); o filho avalia localmente e alerta ao **entrar/sair**. |
+| **Relatório de uso** | O filho envia o resumo de uso do dia (top apps); o pai vê a lista por app. |
+| **Modo dever de casa** | Botão de 1 h que bloqueia internet e todos os apps gerenciados (foco nos estudos). |
+| **Filtro de conteúdo adulto (DNS)** | Em Device Owner, força um DNS-over-TLS família (`family.cloudflare-dns.com`) globalmente. |
+
+> **Privacidade/Play:** localização exige **aviso explícito** (o app mostra sempre
+> o status de dispositivo gerenciado e a política de privacidade deve declarar a
+> coleta de localização). A localização em segundo plano é *best-effort*: para
+> rastreamento contínuo em background robusto, adicione o tipo de serviço em
+> foreground `location`. O filtro de conteúdo por DNS requer **Device Owner**.
+
 ## Fluxo de uso
 
-1. Instale o APK/AAB nos dois celulares.
-2. No **celular do filho**: escolha "Este é o celular do FILHO", conclua o setup
-   (notificações → autorizar bloqueio de internet → ativar anti-desinstalação →
-   desativar otimização de bateria). Um **código de pareamento** aparece na tela.
-3. No **celular do responsável**: escolha "Este é o celular do RESPONSÁVEL",
-   digite o código do filho, defina as janelas de bloqueio e envie.
+1. Instale o APK/AAB em cada celular.
+2. Em **cada celular de filho**: escolha "Este é o celular do FILHO", conclua o
+   setup (notificações → autorizar bloqueio de internet → ativar
+   anti-desinstalação → desativar otimização de bateria). Um **código de
+   pareamento** aparece na tela.
+3. No **celular do responsável**: escolha "Este é o celular do RESPONSÁVEL". O app
+   abre um **painel de filhos**. Para cada filho, informe um nome e o código
+   exibido no celular dele e toque em "Conectar filho".
+4. Toque em um filho no painel para editar as janelas de bloqueio dele ou usar
+   "Bloquear agora". Cada filho tem sua **própria agenda**, aplicada de forma
+   independente.
+
+### Vários filhos, um só responsável
+
+O modo responsável gerencia **quantos filhos você quiser**. Cada filho é um
+documento próprio no Firestore (`families/{códigoDoFilho}`) e recebe apenas a
+sua política — o celular de um filho nunca é afetado pela regra de outro.
+
+### Remover a proteção / desinstalar
+
+A proteção anti-desinstalação impede **a criança**, nunca o responsável. No
+painel do pai, cada filho tem o botão **"Remover proteção / desinstalar"**:
+
+1. Confirma na caixa de diálogo.
+2. Com Firebase ativo, o comando chega ao celular do filho em tempo real; o app
+   desativa o bloqueio, remove o Device Admin/Owner (`clearDeviceOwnerApp` +
+   `removeActiveAdmin`, `setUninstallBlocked(false)`) e para o serviço.
+3. Depois disso, o app pode ser **desinstalado normalmente**, inclusive no modo
+   Device Owner — sem precisar de computador.
+
+Sem Firebase (ou com o celular do filho offline), use o caminho manual:
+Configurações → Segurança → Apps de administração → Morpheus → Desativar →
+desinstalar. Em Device Owner sem rede, o último recurso é `adb shell dpm
+remove-active-admin ...` ou reset de fábrica.
 
 ## Build local
 
@@ -83,11 +145,34 @@ responsável controlar o filho à distância:
 
 1. Crie um projeto no [Firebase](https://console.firebase.google.com/), adicione
    um app Android com `applicationId` `com.morpheus.family`.
-2. Ative **Cloud Firestore** e **Cloud Messaging**.
+2. Ative **Cloud Firestore**, **Cloud Messaging** e, em **Authentication →
+   Sign-in method**, o provedor **Anônimo** (o app faz login anônimo para as
+   regras de segurança aceitarem as requisições).
 3. Baixe o `google-services.json` e coloque em `app/google-services.json`
    (ignorado pelo git). O plugin do Google Services é aplicado automaticamente
    quando o arquivo existe.
-4. Regras sugeridas do Firestore: restrinja `families/{pairId}` para exigir auth.
+4. Publique as regras de segurança do arquivo [`firestore.rules`](firestore.rules):
+   ```bash
+   firebase deploy --only firestore:rules
+   ```
+5. Estrutura no Firestore: um documento por filho em
+   `families/{códigoDoFilho}` com os campos `scheduleJson` e
+   `releaseRequestedAt`. O responsável escreve; cada celular de filho escuta o
+   **seu** documento em tempo real (agenda + comando de remover proteção).
+
+### Onde hospedar o Firebase e quanto custa
+
+Você **não hospeda** o Firebase — ele é 100% gerenciado pelo Google, sem
+servidor para manter. A "hospedagem" é a escolha do plano do projeto:
+
+| Plano | Custo | Serve para |
+| --- | --- | --- |
+| **Spark (gratuito)** | **R$ 0** | Uso familiar. Firestore free: ~1 GiB armazenado, 50 mil leituras + 20 mil escritas **por dia**, Auth ilimitado. Sobra muito para alguns aparelhos. |
+| **Blaze (pago por uso)** | Só paga o que exceder o free | Necessário apenas se um dia enviar push via Cloud Functions ou crescer muito. |
+
+Recomendação: comece no **Spark (grátis)** — para controle parental de família
+não há custo. Escolha a região do Firestore mais perto (ex.: `southamerica-east1`,
+São Paulo) ao criar o banco, para menor latência.
 
 ## CI/CD → Play Store
 
@@ -121,12 +206,21 @@ git tag v1.0.0 && git push origin v1.0.0
 ```
 app/src/main/java/com/morpheus/family/
 ├── MorpheusApp.kt            # canais de notificação
-├── admin/                    # Device Admin (anti-desinstalação)
+├── admin/                    # Device Admin (anti-desinstalação) + ProtectionManager (release)
 ├── vpn/                      # VpnService de bloqueio
 ├── schedule/                 # motor de decisão + alarmes
 ├── service/                  # GuardianService (foreground + sync)
 ├── receiver/                 # boot + alarme de horário
 ├── remote/                   # Firebase (Firestore + FCM), opcional
-├── data/                     # modo, Schedule, DataStore
-└── ui/                       # Compose: seleção de modo, filho, responsável
+├── data/                     # modo, Schedule, ChildRef, DataStore
+└── ui/                       # Compose: seleção de modo, filho, painel do responsável
 ```
+
+## Referência
+
+O CI/CD e o fluxo de publicação na Play Store seguem o padrão do app
+[`gps_speed`](https://github.com/tenoriodouglas/gps_speed) (deploy via
+`r0adkll/upload-google-play`, keystore em base64, AAB assinado como artifact).
+O `gps_speed` é em Flutter; o Morpheus é **Kotlin nativo** porque o motor de
+bloqueio depende de APIs de sistema (VpnService, Device Admin) que são nativas —
+o que também o mantém leve.

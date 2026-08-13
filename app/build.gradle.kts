@@ -4,6 +4,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
     // Firebase (remote parent<->child commands) only applies when a
     // google-services.json is present, so open-source builds still work.
     id("com.google.gms.google-services") apply false
@@ -28,7 +29,9 @@ android {
         applicationId = "com.morpheus.family"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
+        // versionCode auto-increments in CI (VERSION_CODE = run_number + offset)
+        // so every Play upload is unique and increasing; defaults to 1 locally.
+        versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
         versionName = "1.0.0"
         vectorDrawables { useSupportLibrary = true }
     }
@@ -101,10 +104,20 @@ dependencies {
     // Coroutines.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
+    // JSON serialization for the richer app-policy model (JVM-pure, unit-testable).
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+
+    // Location (child location for the parent, geofence, SOS).
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    // await() bridge for Play Services Tasks.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+
     // Firebase (optional remote channel). Guarded at runtime by available().
     implementation(platform("com.google.firebase:firebase-bom:33.3.0"))
     implementation("com.google.firebase:firebase-messaging-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
+    // Anonymous auth so Firestore security rules can require request.auth != null.
+    implementation("com.google.firebase:firebase-auth-ktx")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

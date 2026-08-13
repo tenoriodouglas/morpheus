@@ -41,11 +41,16 @@ data class Schedule(
         BlockWindow(startMinutes = 22 * 60, endMinutes = 6 * 60 + 30),
     ),
     val manualBlockUntil: Long = 0L,
+    // Grants "extra time": while allowUntil is in the future, blocking is
+    // suspended (used to approve a child's request), unless the parent has an
+    // explicit manual block active (which wins).
+    val allowUntil: Long = 0L,
 ) {
     /** Whether internet should be blocked at [nowMillis] under this policy. */
     fun isBlockedAt(nowMillis: Long): Boolean {
         if (!enabled) return false
         if (manualBlockUntil > nowMillis) return true
+        if (allowUntil > nowMillis) return false
 
         val cal = Calendar.getInstance().apply { timeInMillis = nowMillis }
         val nowMinutes = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)

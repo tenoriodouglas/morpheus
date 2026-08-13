@@ -33,7 +33,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.morpheus.family.admin.MorpheusDeviceAdminReceiver
+import com.morpheus.family.data.Geofence
 import com.morpheus.family.data.Prefs
+import com.morpheus.family.location.LocationReporter
+import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.service.GuardianService
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -55,7 +58,7 @@ fun ChildScreen(prefs: Prefs) {
     // Ensure a pairing code exists and the guardian service is running.
     LaunchedEffect(pairId) {
         if (pairId.isNullOrBlank()) {
-            prefs.setPairedId(UUID.randomUUID().toString().take(6).uppercase())
+            prefs.setPairedId(UUID.randomUUID().toString().take(8).uppercase())
         } else {
             GuardianService.start(context)
         }
@@ -63,6 +66,9 @@ fun ChildScreen(prefs: Prefs) {
 
     val notifLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
+    ) { refresh++ }
+    val locationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
     ) { refresh++ }
     val vpnLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -110,6 +116,25 @@ fun ChildScreen(prefs: Prefs) {
         SetupButton("4. Desativar otimização de bateria") {
             runCatching { context.startActivity(batteryIntent()) }
         }
+        SetupButton("5. Ativar bloqueio de apps (Acessibilidade)") {
+            runCatching { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        }
+        SetupButton("6. Permitir acesso de uso (limites por app)") {
+            runCatching { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
+        }
+        SetupButton("7. Permitir localização (mapa e SOS)") {
+            locationLauncher.launch(
+                arrayOf(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                ),
+            )
+        }
+        Text(
+            "Passos 5 a 7 habilitam bloqueio de apps, limites diários e localização " +
+                "(passos 5 e 6 não são necessários no modo Device Owner).",
+            style = MaterialTheme.typography.bodySmall,
+        )
 
         Spacer(Modifier.height(8.dp))
         Card(Modifier.fillMaxWidth()) {
@@ -125,6 +150,36 @@ fun ChildScreen(prefs: Prefs) {
                     "Definidos pelo responsável. Este aparelho é gerenciado pelo Morpheus.",
                     style = MaterialTheme.typography.bodySmall,
                 )
+            }
+        }
+
+        // Requests + SOS.
+        val id = pairId
+        if (!id.isNullOrBlank()) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Precisa de algo?", style = MaterialTheme.typography.titleMedium)
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                RemoteRepository.reportRequest(
+                                    context, id, "extra", "Pediu mais tempo", System.currentTimeMillis(),
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Pedir mais tempo ao responsável") }
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                val now = System.currentTimeMillis()
+                                RemoteRepository.reportAlert(context, id, "sos", now)
+                                LocationReporter.reportOnce(context, id, Geofence(), now)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("🆘 Enviar SOS") }
+                }
             }
         }
     }

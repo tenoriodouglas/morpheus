@@ -11,4 +11,7 @@
     <string name="managed_title">Dispositivo gerenciado pelo Morpheus</string>
     <string name="managed_text">Os horários de uso são definidos pelo responsável.</string>
     <string name="blocked_text">Internet bloqueada pelo horário definido pelo responsável.</string>
+
+    <!-- Accessibility (app-block fallback) -->
+    <string name="a11y_description">Permite ao Morpheus aplicar o bloqueio de apps definido pelo responsável, exibindo um aviso quando um app bloqueado é aberto.</string>
 </resources>

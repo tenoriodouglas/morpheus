@@ -7,9 +7,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -17,48 +17,381 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import android.content.Intent
+import android.net.Uri
+import com.google.firebase.firestore.ListenerRegistration
 import com.morpheus.family.data.BlockWindow
+import com.morpheus.family.data.ChildRef
+import com.morpheus.family.data.KnownApps
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
 import com.morpheus.family.remote.RemoteRepository
+import com.morpheus.family.util.Pin
 import kotlinx.coroutines.launch
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
- * Parent device: enters the child's pairing code, edits the block schedule and
- * pushes it. When Firebase is configured, changes reach the child in real time;
- * otherwise this screen still edits the local policy (useful on the child device
- * itself, or for a single-phone setup).
+ * Parent device. A dashboard lists every managed child; selecting one opens its
+ * own schedule + app-rules editor. Each child has an independent policy pushed to
+ * its own Firestore document, so one parent phone controls many child phones.
+ * If a parent PIN is set, it gates the whole screen.
  */
 @Composable
 fun ParentScreen(prefs: Prefs) {
+    val pinHash by prefs.parentPinFlow.collectAsState(initial = null)
+    var unlocked by remember { mutableStateOf(false) }
+
+    val hash = pinHash
+    if (hash != null && !unlocked) {
+        PinGate(expectedHash = hash, onUnlock = { unlocked = true })
+    } else {
+        ParentHome(prefs)
+    }
+}
+
+@Composable
+private fun ParentHome(prefs: Prefs) {
+    var selectedChildId by remember { mutableStateOf<String?>(null) }
+    val children by prefs.childrenFlow.collectAsState(initial = emptyList())
+
+    val selected = children.firstOrNull { it.id == selectedChildId }
+    if (selected != null) {
+        ChildScheduleEditor(prefs, selected, onBack = { selectedChildId = null })
+    } else {
+        ParentDashboard(prefs, children, onOpenChild = { selectedChildId = it })
+    }
+}
+
+@Composable
+private fun PinGate(expectedHash: String, onUnlock: () -> Unit) {
+    var input by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf(false) }
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Morpheus", style = MaterialTheme.typography.headlineMedium)
+        Text("Digite o PIN do responsável", modifier = Modifier.padding(vertical = 12.dp))
+        OutlinedTextField(
+            value = input,
+            onValueChange = { input = it.filter(Char::isDigit); error = false },
+            label = { Text("PIN") },
+            singleLine = true,
+            isError = error,
+        )
+        if (error) Text("PIN incorreto", color = MaterialTheme.colorScheme.error)
+        Button(
+            onClick = {
+                if (com.morpheus.family.util.Pin.hash(input) == expectedHash) onUnlock() else error = true
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+        ) { Text("Entrar") }
+    }
+}
+
+@Composable
+private fun ParentDashboard(
+    prefs: Prefs,
+    children: List<ChildRef>,
+    onOpenChild: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val remoteAvailable = remember { RemoteRepository.available(context) }
+
+    var codeInput by remember { mutableStateOf("") }
+    var nameInput by remember { mutableStateOf("") }
+    var confirmRelease by remember { mutableStateOf<ChildRef?>(null) }
+
+    // Listen for alerts (tamper/SOS/geofence) and requests from each child.
+    val alerts = remember { mutableStateMapOf<String, Pair<String, Long>>() }
+    val requests = remember { mutableStateMapOf<String, Triple<String, String, Long>>() }
+    DisposableEffect(children, remoteAvailable) {
+        val regs = mutableListOf<ListenerRegistration>()
+        if (remoteAvailable) {
+            children.forEach { child ->
+                RemoteRepository.listenAlert(context, child.id) { type, at ->
+                    alerts[child.id] = type to at
+                }?.let { regs.add(it) }
+                RemoteRepository.listenRequest(context, child.id) { type, note, at ->
+                    requests[child.id] = Triple(type, note, at)
+                }?.let { regs.add(it) }
+            }
+        }
+        onDispose { regs.forEach { it.remove() } }
+    }
+
+    fun grantExtraTime(child: ChildRef) {
+        scope.launch {
+            val extra = System.currentTimeMillis() + 30 * 60 * 1000
+            val sched = prefs.childSchedule(child.id).copy(allowUntil = extra)
+            prefs.setChildSchedule(child.id, sched)
+            RemoteRepository.pushPolicy(context, child.id, sched)
+            val ap = prefs.childAppPolicy(child.id).copy(bonusUntil = extra)
+            prefs.setChildAppPolicy(child.id, ap)
+            RemoteRepository.pushAppPolicy(context, child.id, ap)
+            RemoteRepository.clearRequest(context, child.id)
+            requests.remove(child.id)
+        }
+    }
+    fun denyRequest(child: ChildRef) {
+        scope.launch { RemoteRepository.clearRequest(context, child.id); requests.remove(child.id) }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Text("Modo Responsável", style = MaterialTheme.typography.headlineMedium)
+
+        if (!remoteAvailable) {
+            Text(
+                "Firebase não configurado neste build — as regras são salvas localmente. " +
+                    "Ative o Firebase (veja o README) para controlar os filhos à distância.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+
+        val fmt = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
+
+        // Alerts (tamper / SOS / geofence).
+        children.forEach { child ->
+            alerts[child.id]?.let { (type, at) ->
+                val what = when (type) {
+                    "time_tamper" -> "possível alteração da hora do sistema"
+                    "sos" -> "🆘 SOS — pedido de ajuda!"
+                    "geofence_enter" -> "chegou na área monitorada"
+                    "geofence_exit" -> "saiu da área monitorada"
+                    else -> "evento de segurança"
+                }
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            "⚠️ ${child.name}: $what",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Text("Em ${fmt.format(Date(at))}", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+
+        // Extra-time / unlock requests.
+        children.forEach { child ->
+            requests[child.id]?.let { (_, note, at) ->
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("🙋 ${child.name} pediu: ${note.ifBlank { "mais tempo" }}",
+                            style = MaterialTheme.typography.titleMedium)
+                        Text("Em ${fmt.format(Date(at))}", style = MaterialTheme.typography.bodySmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { grantExtraTime(child) }) { Text("Aprovar +30 min") }
+                            OutlinedButton(onClick = { denyRequest(child) }) { Text("Negar") }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add a child.
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Adicionar um filho", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { Text("Nome (ex.: João)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = codeInput,
+                    onValueChange = { codeInput = it.uppercase() },
+                    label = { Text("Código exibido no celular do filho") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = {
+                        val id = codeInput.trim()
+                        if (id.isNotBlank()) {
+                            scope.launch {
+                                prefs.upsertChild(ChildRef(id, nameInput.trim().ifBlank { id }))
+                                // Seed the child with the default schedule and push it.
+                                val seed = prefs.childSchedule(id)
+                                prefs.setChildSchedule(id, seed)
+                                RemoteRepository.pushPolicy(context, id, seed)
+                                codeInput = ""; nameInput = ""
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Conectar filho") }
+            }
+        }
+
+        SecurityPinCard(prefs)
+
+        Text(
+            if (children.isEmpty()) "Nenhum filho conectado ainda."
+            else "Filhos conectados (${children.size})",
+            style = MaterialTheme.typography.titleMedium,
+        )
+
+        children.forEach { child ->
+            ChildCard(
+                prefs = prefs,
+                child = child,
+                onOpen = { onOpenChild(child.id) },
+                onBlockNow = {
+                    scope.launch {
+                        val s = prefs.childSchedule(child.id)
+                            .copy(manualBlockUntil = System.currentTimeMillis() + 60 * 60 * 1000)
+                        prefs.setChildSchedule(child.id, s)
+                        RemoteRepository.pushPolicy(context, child.id, s)
+                    }
+                },
+                onRequestRelease = { confirmRelease = child },
+            )
+        }
+    }
+
+    val releasing = confirmRelease
+    if (releasing != null) {
+        AlertDialog(
+            onDismissRequest = { confirmRelease = null },
+            title = { Text("Remover proteção de ${releasing.name}?") },
+            text = {
+                Text(
+                    if (remoteAvailable)
+                        "O celular de ${releasing.name} vai desativar o bloqueio e a proteção " +
+                            "anti-desinstalação assim que estiver online. Depois disso o app pode " +
+                            "ser desinstalado normalmente. Esta ação não pode ser desfeita à distância."
+                    else
+                        "O Firebase não está configurado, então não é possível remover à distância. " +
+                            "No celular do filho: Configurações → Segurança → Apps de administração → " +
+                            "Morpheus → Desativar, e então desinstale. Vou apenas remover ${releasing.name} " +
+                            "desta lista.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        if (remoteAvailable) {
+                            RemoteRepository.requestRelease(
+                                context, releasing.id, System.currentTimeMillis(),
+                            )
+                        }
+                        prefs.removeChild(releasing.id)
+                    }
+                    confirmRelease = null
+                }) { Text(if (remoteAvailable) "Remover proteção" else "Remover da lista") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRelease = null }) { Text("Cancelar") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun SecurityPinCard(prefs: Prefs) {
+    val scope = rememberCoroutineScope()
+    val pinHash by prefs.parentPinFlow.collectAsState(initial = null)
+    var input by remember { mutableStateOf("") }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("PIN do responsável", style = MaterialTheme.typography.titleMedium)
+            if (pinHash == null) {
+                Text(
+                    "Defina um PIN para proteger o acesso a este painel.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it.filter(Char::isDigit) },
+                    label = { Text("Novo PIN (mín. 4 dígitos)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = { if (input.length >= 4) scope.launch { prefs.setParentPin(Pin.hash(input)); input = "" } },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Definir PIN") }
+            } else {
+                Text("PIN ativo.", style = MaterialTheme.typography.bodyMedium)
+                OutlinedButton(
+                    onClick = { scope.launch { prefs.setParentPin(null) } },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Remover PIN") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChildCard(
+    prefs: Prefs,
+    child: ChildRef,
+    onOpen: () -> Unit,
+    onBlockNow: () -> Unit,
+    onRequestRelease: () -> Unit,
+) {
+    val schedule by prefs.childScheduleFlow(child.id).collectAsState(initial = Schedule())
+    val s = schedule ?: Schedule()
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(child.name, style = MaterialTheme.typography.titleLarge)
+            Text("Código: ${child.id}", style = MaterialTheme.typography.bodySmall)
+            Text(
+                if (!s.enabled) "Bloqueio desligado"
+                else "Janelas: " + s.windows.joinToString(", ") { it.label() },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onOpen) { Text("Editar horários") }
+                OutlinedButton(onClick = onBlockNow) { Text("Bloquear 1h") }
+            }
+            TextButton(onClick = onRequestRelease) { Text("Remover proteção / desinstalar") }
+        }
+    }
+}
+
+@Composable
+private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val pairId by prefs.pairedIdFlow.collectAsState(initial = null)
-    val schedule by prefs.scheduleFlow.collectAsState(initial = Schedule())
-
-    var codeInput by remember { mutableStateOf("") }
-    val remoteAvailable = remember { RemoteRepository.available(context) }
-
+    val schedule by prefs.childScheduleFlow(child.id).collectAsState(initial = Schedule())
     val current = schedule ?: Schedule()
     val window = current.windows.firstOrNull() ?: BlockWindow(22 * 60, 6 * 60 + 30)
 
     fun persist(newSchedule: Schedule) {
         scope.launch {
-            prefs.setSchedule(newSchedule)
-            pairId?.let { RemoteRepository.pushPolicy(context, it, newSchedule) }
+            prefs.setChildSchedule(child.id, newSchedule)
+            RemoteRepository.pushPolicy(context, child.id, newSchedule)
         }
     }
 
@@ -71,38 +404,10 @@ fun ParentScreen(prefs: Prefs) {
         modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text("Modo Responsável", style = MaterialTheme.typography.headlineMedium)
+        TextButton(onClick = onBack) { Text("← Voltar aos filhos") }
+        Text(child.name, style = MaterialTheme.typography.headlineMedium)
+        Text("Código: ${child.id}", style = MaterialTheme.typography.bodySmall)
 
-        // Pairing.
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Parear com o celular do filho", style = MaterialTheme.typography.titleMedium)
-                if (pairId.isNullOrBlank()) {
-                    OutlinedTextField(
-                        value = codeInput,
-                        onValueChange = { codeInput = it.uppercase() },
-                        label = { Text("Código exibido no celular do filho") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Button(
-                        onClick = { if (codeInput.isNotBlank()) scope.launch { prefs.setPairedId(codeInput.trim()) } },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Conectar") }
-                } else {
-                    Text("Pareado: $pairId")
-                    if (!remoteAvailable) {
-                        Text(
-                            "Firebase não configurado neste build — as mudanças só se aplicam localmente. " +
-                                "Veja o README para ativar o controle remoto.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-            }
-        }
-
-        // Master switch.
         Card(Modifier.fillMaxWidth()) {
             Row(
                 Modifier.fillMaxWidth().padding(16.dp),
@@ -117,7 +422,6 @@ fun ParentScreen(prefs: Prefs) {
             }
         }
 
-        // Window editor.
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Janela de bloqueio", style = MaterialTheme.typography.titleMedium)
@@ -128,13 +432,12 @@ fun ParentScreen(prefs: Prefs) {
                     updateWindow(window.copy(endMinutes = it))
                 }
                 Text(
-                    "Durante esta janela, a internet do celular do filho fica bloqueada.",
+                    "Durante esta janela, a internet do celular de ${child.name} fica bloqueada.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
         }
 
-        // Immediate block.
         Button(
             onClick = {
                 persist(current.copy(manualBlockUntil = System.currentTimeMillis() + 60 * 60 * 1000))
@@ -146,27 +449,61 @@ fun ParentScreen(prefs: Prefs) {
             onClick = { persist(current.copy(manualBlockUntil = 0L)) },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Cancelar bloqueio imediato") }
+
+        ChildTelemetryCard(child)
+
+        AppRulesEditor(prefs, child)
     }
 }
 
-/** Simple +/- 15 minute stepper rendering a HH:MM label. */
 @Composable
-private fun TimeStepper(label: String, minutes: Int, onChange: (Int) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, modifier = Modifier.padding(end = 8.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = { onChange((minutes - 15 + 1440) % 1440) }) { Text("−") }
-            Text(
-                "%02d:%02d".format(minutes / 60, minutes % 60),
-                style = MaterialTheme.typography.titleLarge,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(horizontal = 16.dp),
-            )
-            OutlinedButton(onClick = { onChange((minutes + 15) % 1440) }) { Text("+") }
+private fun ChildTelemetryCard(child: ChildRef) {
+    val context = LocalContext.current
+    val remoteAvailable = remember { RemoteRepository.available(context) }
+    var location by remember { mutableStateOf<Triple<Double, Double, Long>?>(null) }
+    var usage by remember { mutableStateOf<Pair<String, Long>?>(null) }
+
+    DisposableEffect(child.id, remoteAvailable) {
+        val regs = mutableListOf<ListenerRegistration>()
+        if (remoteAvailable) {
+            RemoteRepository.listenLocation(context, child.id) { lat, lng, at ->
+                location = Triple(lat, lng, at)
+            }?.let { regs.add(it) }
+            RemoteRepository.listenUsage(context, child.id) { json, at ->
+                usage = json to at
+            }?.let { regs.add(it) }
+        }
+        onDispose { regs.forEach { it.remove() } }
+    }
+
+    val fmt = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Localização e uso", style = MaterialTheme.typography.titleMedium)
+
+            val loc = location
+            if (loc == null) {
+                Text("Sem localização recente.", style = MaterialTheme.typography.bodySmall)
+            } else {
+                Text("Última posição: %.5f, %.5f".format(loc.first, loc.second))
+                Text("Em ${fmt.format(Date(loc.third))}", style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = {
+                    val uri = Uri.parse("geo:${loc.first},${loc.second}?q=${loc.first},${loc.second}(${child.name})")
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+                }) { Text("Abrir no mapa") }
+            }
+
+            val u = usage
+            if (u != null && u.first.isNotBlank()) {
+                Text("Uso hoje (min):", style = MaterialTheme.typography.titleSmall)
+                val map = remember(u.first) {
+                    runCatching { Json.decodeFromString<Map<String, Int>>(u.first) }.getOrDefault(emptyMap())
+                }
+                map.entries.sortedByDescending { it.value }.forEach { (pkg, min) ->
+                    Text("• ${KnownApps.labelFor(pkg)}: $min min", style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
     }
 }

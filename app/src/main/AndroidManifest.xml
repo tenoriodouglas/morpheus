@@ -20,6 +20,18 @@
          status that Google Play policy requires for monitoring apps. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Per-app daily limits: read foreground time. Granted via Settings
+         (Usage access), not a runtime prompt. -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- Location (child location for the parent, geofence, SOS). Disclosed to
+         the child (managed-device notice) and in the privacy policy. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
     <application
         android:name=".MorpheusApp"
         android:allowBackup="false"
@@ -38,6 +50,28 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Full-screen notice shown when a blocked app is opened (fallback path). -->
+        <activity
+            android:name=".ui.BlockedAppActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:noHistory="true"
+            android:theme="@style/Theme.Morpheus" />
+
+        <!-- Fallback app blocker for non-Device-Owner installs. -->
+        <service
+            android:name=".service.AppBlockAccessibilityService"
+            android:exported="false"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/app_block_accessibility_config" />
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+        </service>
 
         <!-- Device Admin: prevents uninstall by the child while active and
              lets the parent enforce policy. Strong (unremovable) mode requires

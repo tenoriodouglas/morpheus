@@ -5,39 +5,102 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
+import android.os.Build
+import com.morpheus.family.admin.DeviceRestrictionsManager
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
+import com.morpheus.family.enforcement.AppEnforcer
+import com.morpheus.family.enforcement.UsageTracker
+import com.morpheus.family.location.LocationReporter
 import com.morpheus.family.receiver.ScheduleAlarmReceiver
+import com.morpheus.family.remote.RemoteRepository
+import com.morpheus.family.time.TrustedTimeProvider
 import com.morpheus.family.vpn.BlockingVpnService
 import kotlinx.coroutines.runBlocking
 
 /**
- * The brain of the child-side enforcement. Given the current [Schedule] it
- * turns the blocking VPN on or off, then arms an exact alarm for the next moment
- * the decision will change — so enforcement is event-driven and battery-cheap
- * rather than a busy poll.
+ * The brain of the child-side enforcement. Uses [TrustedTimeProvider] (not the
+ * tamperable system clock) to decide whether to block, applies the internet
+ * schedule, per-app rules and device restrictions, then arms an exact alarm for
+ * the next boundary. Fails closed: if time can't be trusted or looks tampered,
+ * it blocks and alerts the parent.
  */
 object ScheduleEnforcer {
 
-    /** Re-evaluate the schedule and (un)block accordingly. Safe to call often. */
-    fun apply(context: Context, now: Long = System.currentTimeMillis()) {
-        val schedule = runBlocking { Prefs(context).schedule() }
-        val blocked = schedule.isBlockedAt(now)
+    /** Re-evaluate all policy and enforce. Safe to call often. */
+    fun apply(context: Context) {
+        val prefs = Prefs(context)
+        val schedule = runBlocking { prefs.schedule() }
+        val appPolicy = runBlocking { prefs.appPolicy() }
+
+        val t = TrustedTimeProvider.now()
+        var blocked = schedule.isBlockedAt(t.millis)
+
+        // Homework/focus mode also blocks internet.
+        if (appPolicy.homeworkActive(t.millis)) blocked = true
+
+        // Fail closed: a tampered wall clock means block now and warn the parent.
+        if (t.tampered) {
+            blocked = true
+            runCatching {
+                val pairId = runBlocking { prefs.pairedId() } ?: ""
+                RemoteRepository.reportAlert(context, pairId, "time_tamper", System.currentTimeMillis())
+            }
+        }
 
         if (blocked) {
-            if (vpnConsentGranted(context)) {
-                BlockingVpnService.block(context)
-            }
-            // If consent is not yet granted, the child UI surfaces the prompt.
+            if (vpnConsentGranted(context)) BlockingVpnService.block(context)
         } else {
             BlockingVpnService.unblock(context)
         }
 
-        armNextBoundary(context, schedule, now)
+        // Per-app blocking + device restrictions.
+        runCatching { AppEnforcer.apply(context, appPolicy, t.millis) }
+        runCatching { DeviceRestrictionsManager.apply(context, appPolicy.restrictions) }
+
+        armNextBoundary(context, schedule, t.millis)
+    }
+
+    /** Refresh trusted network time, enforce, then upload telemetry. */
+    suspend fun syncAndApply(context: Context) {
+        runCatching { TrustedTimeProvider.sync() }
+        apply(context)
+        runCatching { uploadTelemetry(context) }
+    }
+
+    /** Child -> parent: push current location (+geofence) and a usage summary. */
+    private suspend fun uploadTelemetry(context: Context) {
+        val prefs = Prefs(context)
+        val pairId = prefs.pairedId() ?: return
+        if (pairId.isBlank()) return
+        val appPolicy = prefs.appPolicy()
+        val now = System.currentTimeMillis()
+
+        LocationReporter.reportOnce(context, pairId, appPolicy.geofence, now)
+
+        if (UsageTracker.hasUsageAccess(context)) {
+            val usage = UsageTracker.topAppsToday(context)
+            if (usage.isNotEmpty()) {
+                val json = usage.joinToString(",", "{", "}") { (pkg, min) -> "\"$pkg\":$min" }
+                RemoteRepository.reportUsage(context, pairId, json, now)
+            }
+        }
     }
 
     /** True once the child has approved the VPN (or Device Owner pre-granted it). */
     fun vpnConsentGranted(context: Context): Boolean = VpnService.prepare(context) == null
+
+    /** Cancel the pending boundary alarm (used when protection is released). */
+    fun cancel(context: Context) {
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val pi = PendingIntent.getBroadcast(
+            context,
+            REQ_CODE,
+            Intent(context, ScheduleAlarmReceiver::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        runCatching { am.cancel(pi) }
+    }
 
     private fun armNextBoundary(context: Context, schedule: Schedule, now: Long) {
         val next = nextBoundary(schedule, now) ?: (now + DEFAULT_RECHECK_MS)
@@ -48,8 +111,12 @@ object ScheduleEnforcer {
             Intent(context, ScheduleAlarmReceiver::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        // canScheduleExactAlarms() exists only on API 31+; before that, exact
+        // alarms need no special permission, so schedule them directly.
+        val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            am.canScheduleExactAlarms()
         runCatching {
-            if (am.canScheduleExactAlarms()) {
+            if (canExact) {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)
             } else {
                 am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)

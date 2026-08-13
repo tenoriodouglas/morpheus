@@ -1,6 +1,7 @@
 package com.morpheus.family
 
 import com.morpheus.family.data.BlockWindow
+import com.morpheus.family.data.ChildRef
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
 import org.junit.Assert.assertEquals
@@ -47,6 +48,39 @@ class ScheduleTest {
         val s = Schedule(windows = emptyList(), manualBlockUntil = now + 60_000)
         assertTrue(s.isBlockedAt(now))
         assertFalse(s.isBlockedAt(now + 120_000))
+    }
+
+    @Test
+    fun allowUntil_grantsExtraTimeButManualBlockWins() {
+        val night = listOf(BlockWindow(22 * 60, 6 * 60 + 30))
+        val now = at(2026, Calendar.AUGUST, 13, 23, 0) // normally blocked
+        // allowUntil suspends the block...
+        val allowed = Schedule(windows = night, allowUntil = now + 60_000)
+        assertFalse(allowed.isBlockedAt(now))
+        assertTrue(allowed.isBlockedAt(now + 120_000)) // extra time expired
+        // ...unless an explicit manual block is active (it wins).
+        val blocked = allowed.copy(manualBlockUntil = now + 60_000)
+        assertTrue(blocked.isBlockedAt(now))
+    }
+
+    @Test
+    fun children_roundTripAndUpsertSemantics() {
+        val list = listOf(
+            ChildRef("ABC123", "João"),
+            ChildRef("XYZ789", "Maria | Ana"), // pipe must be sanitized
+        )
+        val decoded = Prefs.decodeChildren(Prefs.encodeChildren(list))
+        assertEquals(2, decoded.size)
+        assertEquals("ABC123", decoded[0].id)
+        assertEquals("João", decoded[0].name)
+        assertFalse(decoded[1].name.contains("|")) // separator stripped
+        assertEquals("XYZ789", decoded[1].id)
+    }
+
+    @Test
+    fun children_emptyDecodesToEmptyList() {
+        assertTrue(Prefs.decodeChildren(null).isEmpty())
+        assertTrue(Prefs.decodeChildren("").isEmpty())
     }
 
     @Test
