@@ -3,7 +3,10 @@ package com.morpheus.family.ui
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
@@ -16,6 +19,7 @@ import com.morpheus.family.ui.theme.MorpheusTheme
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         val prefs = Prefs(applicationContext)
 
@@ -25,11 +29,14 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    val mode by prefs.modeFlow.collectAsState(initial = AppMode.UNSET)
-                    when (mode) {
-                        AppMode.UNSET -> ModeSelectionScreen(prefs)
-                        AppMode.CHILD -> ChildScreen(prefs)
-                        AppMode.PARENT -> ParentScreen(prefs)
+                    // Keep content clear of the status/navigation bars (edge-to-edge).
+                    Box(Modifier.fillMaxSize().systemBarsPadding()) {
+                        val mode by prefs.modeFlow.collectAsState(initial = AppMode.UNSET)
+                        when (mode) {
+                            AppMode.UNSET -> ModeSelectionScreen(prefs)
+                            AppMode.CHILD -> ChildScreen(prefs)
+                            AppMode.PARENT -> ParentScreen(prefs)
+                        }
                     }
                 }
             }
