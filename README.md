@@ -35,13 +35,26 @@ C++/NDK só compensa para cálculo pesado (áudio/vídeo/jogos), o que não é o
 1. **Device Admin (padrão, sem PC):** o filho ativa em 1 toque no setup. Enquanto
    ativo, o app não pode ser desinstalado pelo fluxo normal — é preciso primeiro
    desativar a administração, o que fica visível e pode ser protegido.
-2. **Device Owner (máximo, exige configuração via ADB em aparelho zerado):**
+2. **Device Owner (máximo — a criança não consegue remover):** o app chama
+   `setUninstallBlocked(true)`; não dá para desinstalar nem desativar a
+   administração. Duas formas de provisionar (o aparelho precisa estar **zerado**):
+
+   **a) Sem computador — QR de provisionamento (recomendado):** no app do pai,
+   abra **"Modo máximo (Device Owner)" → Configurar**, informe a **URL do APK
+   assinado** (o app preenche o checksum da assinatura) e gere o **QR**. No
+   celular do filho: **resete de fábrica → toque 6× na tela de boas-vindas →
+   escaneie o QR**. O Android instala o Morpheus como Device Owner. Suporte de DPC:
+   `ProvisioningModeActivity` (`GET_PROVISIONING_MODE`) e `PolicyComplianceActivity`
+   (`ADMIN_POLICY_COMPLIANCE`).
+
+   **b) Via ADB (com PC):**
    ```bash
    adb shell dpm set-device-owner com.morpheus.family/.admin.MorpheusDeviceAdminReceiver
    ```
-   Nesse modo o app chama `setUninstallBlocked(true)` e a criança **não consegue**
-   desinstalar nem desativar a administração. É o modo recomendado para controle
-   parental sério (é como MDMs corporativos funcionam).
+
+   > O QR precisa de um **APK assinado hospedado numa URL pública** e do
+   > **checksum da assinatura** (o app calcula automaticamente quando é o build
+   > release). O `applicationId` publicado deve ser `com.morpheus.family`.
 
 ## Recursos avançados (Fase 1)
 

@@ -274,6 +274,7 @@ private fun ParentDashboard(
         }
 
         SecurityPinCard(prefs)
+        DeviceOwnerSetupCard(prefs)
 
         Text(
             if (children.isEmpty()) "Nenhum filho conectado ainda."

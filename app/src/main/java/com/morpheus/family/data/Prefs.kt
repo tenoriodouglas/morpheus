@@ -38,6 +38,10 @@ class Prefs(private val context: Context) {
         // Parent side: optional PIN (stored hashed) gating the parent UI.
         val PARENT_PIN = stringPreferencesKey("parent_pin")
 
+        // Parent side: URL that serves the signed release APK for Device Owner
+        // QR provisioning.
+        val DO_APK_URL = stringPreferencesKey("do_apk_url")
+
         // Child side: last known geofence membership (null until first fix).
         val GEOFENCE_INSIDE = booleanPreferencesKey("geofence_inside")
 
@@ -100,6 +104,11 @@ class Prefs(private val context: Context) {
     suspend fun setParentPin(hash: String?) = context.dataStore.edit {
         if (hash == null) it.remove(Keys.PARENT_PIN) else it[Keys.PARENT_PIN] = hash
     }
+
+    // Device Owner provisioning APK URL (parent side).
+    val deviceOwnerApkUrlFlow: Flow<String> = context.dataStore.data.map { it[Keys.DO_APK_URL] ?: "" }
+    suspend fun setDeviceOwnerApkUrl(url: String) =
+        context.dataStore.edit { it[Keys.DO_APK_URL] = url }
 
     // Child geofence membership (null until first fix).
     suspend fun geofenceInside(): Boolean? = context.dataStore.data.first()[Keys.GEOFENCE_INSIDE]
