@@ -1,6 +1,7 @@
 package com.morpheus.family.location
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
@@ -28,6 +29,9 @@ object LocationReporter {
             PackageManager.PERMISSION_GRANTED
 
     /** Fetch the current location, upload it, and evaluate the geofence. */
+    // Permission is verified via hasPermission() before any location call below;
+    // lint can't see through that helper, so suppress its false positive.
+    @SuppressLint("MissingPermission")
     suspend fun reportOnce(context: Context, pairId: String, geofence: Geofence, nowMillis: Long) {
         if (pairId.isBlank() || !hasPermission(context)) return
         val client = LocationServices.getFusedLocationProviderClient(context)
