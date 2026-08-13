@@ -37,6 +37,15 @@ android {
     }
 
     signingConfigs {
+        // Fixed debug key (checked into the repo — debug keys are not secret) so
+        // every CI debug build shares one signature. Lets you install a new debug
+        // APK over an old one without "app not installed" signature conflicts.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         create("release") {
             // Values come from keystore.properties (local) or env vars (CI).
             val storePath = keystoreProps.getProperty("storeFile")
@@ -69,6 +78,7 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 

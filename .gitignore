@@ -17,5 +17,8 @@ keystore.properties
 app/google-services.json
 play-service-account.json
 
+# ...except the shared DEBUG key (not secret) so debug builds share a signature
+!app/debug.keystore
+
 # OS
 .DS_Store
