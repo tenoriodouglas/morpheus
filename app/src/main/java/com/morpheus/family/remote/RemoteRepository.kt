@@ -3,6 +3,7 @@ package com.morpheus.family.remote
 import android.content.Context
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.ktx.auth
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.ktx.firestore
@@ -32,6 +33,40 @@ object RemoteRepository {
         if (!available(context)) return
         if (Firebase.auth.currentUser == null) {
             runCatching { Firebase.auth.signInAnonymously() }
+        }
+    }
+
+    /**
+     * Claim membership of the family doc (trust-on-first-use): both the child
+     * and the parent add their anonymous uid, so security rules can later limit
+     * access to those members only.
+     */
+    fun joinMembership(context: Context, pairId: String) {
+        if (!available(context) || pairId.isBlank()) return
+        ensureSignedIn(context)
+        val uid = Firebase.auth.currentUser?.uid ?: return
+        doc(pairId).set(mapOf("members" to FieldValue.arrayUnion(uid)), SetOptions.merge())
+    }
+
+    /** Child: heartbeat so the parent can see the device is online. */
+    fun reportHeartbeat(context: Context, pairId: String, at: Long) {
+        if (!available(context) || pairId.isBlank()) return
+        ensureSignedIn(context)
+        doc(pairId).set(mapOf("lastSeen" to at), SetOptions.merge())
+    }
+
+    /** Parent: observe the child's last-seen heartbeat. */
+    fun listenHeartbeat(
+        context: Context,
+        pairId: String,
+        onSeen: (Long) -> Unit,
+    ): ListenerRegistration? {
+        if (!available(context) || pairId.isBlank()) return null
+        ensureSignedIn(context)
+        return doc(pairId).addSnapshotListener { snap, err ->
+            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+            val at = snap.getLong("lastSeen") ?: 0L
+            if (at > 0L) onSeen(at)
         }
     }
 

@@ -35,13 +35,26 @@ C++/NDK só compensa para cálculo pesado (áudio/vídeo/jogos), o que não é o
 1. **Device Admin (padrão, sem PC):** o filho ativa em 1 toque no setup. Enquanto
    ativo, o app não pode ser desinstalado pelo fluxo normal — é preciso primeiro
    desativar a administração, o que fica visível e pode ser protegido.
-2. **Device Owner (máximo, exige configuração via ADB em aparelho zerado):**
+2. **Device Owner (máximo — a criança não consegue remover):** o app chama
+   `setUninstallBlocked(true)`; não dá para desinstalar nem desativar a
+   administração. Duas formas de provisionar (o aparelho precisa estar **zerado**):
+
+   **a) Sem computador — QR de provisionamento (recomendado):** no app do pai,
+   abra **"Modo máximo (Device Owner)" → Configurar**, informe a **URL do APK
+   assinado** (o app preenche o checksum da assinatura) e gere o **QR**. No
+   celular do filho: **resete de fábrica → toque 6× na tela de boas-vindas →
+   escaneie o QR**. O Android instala o Morpheus como Device Owner. Suporte de DPC:
+   `ProvisioningModeActivity` (`GET_PROVISIONING_MODE`) e `PolicyComplianceActivity`
+   (`ADMIN_POLICY_COMPLIANCE`).
+
+   **b) Via ADB (com PC):**
    ```bash
    adb shell dpm set-device-owner com.morpheus.family/.admin.MorpheusDeviceAdminReceiver
    ```
-   Nesse modo o app chama `setUninstallBlocked(true)` e a criança **não consegue**
-   desinstalar nem desativar a administração. É o modo recomendado para controle
-   parental sério (é como MDMs corporativos funcionam).
+
+   > O QR precisa de um **APK assinado hospedado numa URL pública** e do
+   > **checksum da assinatura** (o app calcula automaticamente quando é o build
+   > release). O `applicationId` publicado deve ser `com.morpheus.family`.
 
 ## Recursos avançados (Fase 1)
 
@@ -77,6 +90,17 @@ janela de bloqueio, limite diário), o tempo total de tela e as restrições.
 > rastreamento contínuo em background robusto, adicione o tipo de serviço em
 > foreground `location`. O filtro de conteúdo por DNS requer **Device Owner**.
 
+## Otimizações (Fase 3)
+
+| Recurso | Detalhe |
+| --- | --- |
+| **Pareamento por QR** | O filho exibe um QR; o pai escaneia (câmera). **Digitação manual** continua disponível como alternativa. |
+| **Checklist de setup ao vivo** | Cada permissão do filho mostra ✓/○ e atualiza ao voltar das Configurações; exibe "Tudo pronto" quando o essencial está ativo. |
+| **Status de conexão** | Heartbeat no Firestore; o painel do pai mostra 🟢 Online / 🟡 visto há N min por filho. |
+| **Segurança Firestore (TOFU)** | Regras por **membros**: os dois primeiros aparelhos (pai+filho) reivindicam a posse; depois, mais ninguém acessa mesmo sabendo o código. Ver [`firestore.rules`](firestore.rules). |
+| **Âncora de hora persistida** | A hora confiável sobrevive ao encerramento do processo (re-sincroniza após reboot), reforçando o anti-burla. |
+| **Prontidão Play** | `targetSdk 35` (AGP 8.7), strings em Inglês (`values-en`) para textos do sistema, e [política de privacidade](docs/PRIVACY.md). |
+
 ## Fluxo de uso
 
 1. Instale o APK/AAB em cada celular.
@@ -85,8 +109,9 @@ janela de bloqueio, limite diário), o tempo total de tela e as restrições.
    anti-desinstalação → desativar otimização de bateria). Um **código de
    pareamento** aparece na tela.
 3. No **celular do responsável**: escolha "Este é o celular do RESPONSÁVEL". O app
-   abre um **painel de filhos**. Para cada filho, informe um nome e o código
-   exibido no celular dele e toque em "Conectar filho".
+   abre um **painel de filhos**. Informe um nome e **escaneie o QR** exibido no
+   celular do filho (ou digite o código, caso não consiga ler o QR), e toque em
+   "Conectar filho".
 4. Toque em um filho no painel para editar as janelas de bloqueio dele ou usar
    "Bloquear agora". Cada filho tem sua **própria agenda**, aplicada de forma
    independente.
@@ -113,6 +138,13 @@ Sem Firebase (ou com o celular do filho offline), use o caminho manual:
 Configurações → Segurança → Apps de administração → Morpheus → Desativar →
 desinstalar. Em Device Owner sem rede, o último recurso é `adb shell dpm
 remove-active-admin ...` ou reset de fábrica.
+
+**Se o filho tentar remover:** no modo **Device Admin**, ele consegue desativar a
+administração (com fricção), mas o **responsável é avisado na hora** — o
+`onDisabled` envia um alerta `protection_removed` ao painel do pai. No modo
+**Device Owner** a remoção é bloqueada de vez. O modo Device Owner pode ser
+configurado **sem computador**, escaneando um QR de provisionamento no assistente
+inicial do aparelho (após reset de fábrica).
 
 ## Build local
 
