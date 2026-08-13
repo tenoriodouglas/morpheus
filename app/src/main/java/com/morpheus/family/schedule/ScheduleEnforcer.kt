@@ -40,6 +40,18 @@ object ScheduleEnforcer {
     /** True once the child has approved the VPN (or Device Owner pre-granted it). */
     fun vpnConsentGranted(context: Context): Boolean = VpnService.prepare(context) == null
 
+    /** Cancel the pending boundary alarm (used when protection is released). */
+    fun cancel(context: Context) {
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val pi = PendingIntent.getBroadcast(
+            context,
+            REQ_CODE,
+            Intent(context, ScheduleAlarmReceiver::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        runCatching { am.cancel(pi) }
+    }
+
     private fun armNextBoundary(context: Context, schedule: Schedule, now: Long) {
         val next = nextBoundary(schedule, now) ?: (now + DEFAULT_RECHECK_MS)
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager

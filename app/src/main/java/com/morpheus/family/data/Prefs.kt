@@ -25,6 +25,7 @@ class Prefs(private val context: Context) {
         val SCHEDULE = stringPreferencesKey("schedule_json")
         val ADMIN_ACK = booleanPreferencesKey("admin_ack")
         val LAST_APPLIED = longPreferencesKey("last_applied")
+        val LAST_RELEASE = longPreferencesKey("last_release")
 
         // Parent side: the roster of managed children and each child's schedule.
         val CHILDREN = stringPreferencesKey("children")
@@ -60,6 +61,11 @@ class Prefs(private val context: Context) {
 
     suspend fun setAdminAcknowledged(value: Boolean) =
         context.dataStore.edit { it[Keys.ADMIN_ACK] = value }
+
+    val lastReleaseFlow: Flow<Long> = context.dataStore.data.map { it[Keys.LAST_RELEASE] ?: 0L }
+    suspend fun lastRelease(): Long = lastReleaseFlow.first()
+    suspend fun setLastRelease(value: Long) =
+        context.dataStore.edit { it[Keys.LAST_RELEASE] = value }
 
     // ---- Parent side: multiple managed children -------------------------------
 

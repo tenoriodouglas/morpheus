@@ -55,7 +55,7 @@ fun ChildScreen(prefs: Prefs) {
     // Ensure a pairing code exists and the guardian service is running.
     LaunchedEffect(pairId) {
         if (pairId.isNullOrBlank()) {
-            prefs.setPairedId(UUID.randomUUID().toString().take(6).uppercase())
+            prefs.setPairedId(UUID.randomUUID().toString().take(8).uppercase())
         } else {
             GuardianService.start(context)
         }

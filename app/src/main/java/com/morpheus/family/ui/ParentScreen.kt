@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -66,6 +67,7 @@ private fun ParentDashboard(
 
     var codeInput by remember { mutableStateOf("") }
     var nameInput by remember { mutableStateOf("") }
+    var confirmRelease by remember { mutableStateOf<ChildRef?>(null) }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
@@ -137,9 +139,46 @@ private fun ParentDashboard(
                         RemoteRepository.pushPolicy(context, child.id, s)
                     }
                 },
-                onRemove = { scope.launch { prefs.removeChild(child.id) } },
+                onRequestRelease = { confirmRelease = child },
             )
         }
+    }
+
+    val releasing = confirmRelease
+    if (releasing != null) {
+        AlertDialog(
+            onDismissRequest = { confirmRelease = null },
+            title = { Text("Remover proteção de ${releasing.name}?") },
+            text = {
+                Text(
+                    if (remoteAvailable)
+                        "O celular de ${releasing.name} vai desativar o bloqueio e a proteção " +
+                            "anti-desinstalação assim que estiver online. Depois disso o app pode " +
+                            "ser desinstalado normalmente. Esta ação não pode ser desfeita à distância."
+                    else
+                        "O Firebase não está configurado, então não é possível remover à distância. " +
+                            "No celular do filho: Configurações → Segurança → Apps de administração → " +
+                            "Morpheus → Desativar, e então desinstale. Vou apenas remover ${releasing.name} " +
+                            "desta lista.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        if (remoteAvailable) {
+                            RemoteRepository.requestRelease(
+                                context, releasing.id, System.currentTimeMillis(),
+                            )
+                        }
+                        prefs.removeChild(releasing.id)
+                    }
+                    confirmRelease = null
+                }) { Text(if (remoteAvailable) "Remover proteção" else "Remover da lista") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmRelease = null }) { Text("Cancelar") }
+            },
+        )
     }
 }
 
@@ -149,7 +188,7 @@ private fun ChildCard(
     child: ChildRef,
     onOpen: () -> Unit,
     onBlockNow: () -> Unit,
-    onRemove: () -> Unit,
+    onRequestRelease: () -> Unit,
 ) {
     val schedule by prefs.childScheduleFlow(child.id).collectAsState(initial = Schedule())
     val s = schedule ?: Schedule()
@@ -167,7 +206,7 @@ private fun ChildCard(
                 Button(onClick = onOpen) { Text("Editar horários") }
                 OutlinedButton(onClick = onBlockNow) { Text("Bloquear 1h") }
             }
-            TextButton(onClick = onRemove) { Text("Remover filho") }
+            TextButton(onClick = onRequestRelease) { Text("Remover proteção / desinstalar") }
         }
     }
 }

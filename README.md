@@ -63,6 +63,23 @@ O modo responsável gerencia **quantos filhos você quiser**. Cada filho é um
 documento próprio no Firestore (`families/{códigoDoFilho}`) e recebe apenas a
 sua política — o celular de um filho nunca é afetado pela regra de outro.
 
+### Remover a proteção / desinstalar
+
+A proteção anti-desinstalação impede **a criança**, nunca o responsável. No
+painel do pai, cada filho tem o botão **"Remover proteção / desinstalar"**:
+
+1. Confirma na caixa de diálogo.
+2. Com Firebase ativo, o comando chega ao celular do filho em tempo real; o app
+   desativa o bloqueio, remove o Device Admin/Owner (`clearDeviceOwnerApp` +
+   `removeActiveAdmin`, `setUninstallBlocked(false)`) e para o serviço.
+3. Depois disso, o app pode ser **desinstalado normalmente**, inclusive no modo
+   Device Owner — sem precisar de computador.
+
+Sem Firebase (ou com o celular do filho offline), use o caminho manual:
+Configurações → Segurança → Apps de administração → Morpheus → Desativar →
+desinstalar. Em Device Owner sem rede, o último recurso é `adb shell dpm
+remove-active-admin ...` ou reset de fábrica.
+
 ## Build local
 
 Pré-requisitos: JDK 17 e Android SDK (via Android Studio ou `sdkmanager`).
@@ -94,14 +111,34 @@ responsável controlar o filho à distância:
 
 1. Crie um projeto no [Firebase](https://console.firebase.google.com/), adicione
    um app Android com `applicationId` `com.morpheus.family`.
-2. Ative **Cloud Firestore** e **Cloud Messaging**.
+2. Ative **Cloud Firestore**, **Cloud Messaging** e, em **Authentication →
+   Sign-in method**, o provedor **Anônimo** (o app faz login anônimo para as
+   regras de segurança aceitarem as requisições).
 3. Baixe o `google-services.json` e coloque em `app/google-services.json`
    (ignorado pelo git). O plugin do Google Services é aplicado automaticamente
    quando o arquivo existe.
-4. Estrutura no Firestore: um documento por filho em
-   `families/{códigoDoFilho}` com o campo `scheduleJson`. O responsável escreve;
-   cada celular de filho escuta o **seu** documento em tempo real.
-5. Regras sugeridas do Firestore: restrinja `families/{childId}` para exigir auth.
+4. Publique as regras de segurança do arquivo [`firestore.rules`](firestore.rules):
+   ```bash
+   firebase deploy --only firestore:rules
+   ```
+5. Estrutura no Firestore: um documento por filho em
+   `families/{códigoDoFilho}` com os campos `scheduleJson` e
+   `releaseRequestedAt`. O responsável escreve; cada celular de filho escuta o
+   **seu** documento em tempo real (agenda + comando de remover proteção).
+
+### Onde hospedar o Firebase e quanto custa
+
+Você **não hospeda** o Firebase — ele é 100% gerenciado pelo Google, sem
+servidor para manter. A "hospedagem" é a escolha do plano do projeto:
+
+| Plano | Custo | Serve para |
+| --- | --- | --- |
+| **Spark (gratuito)** | **R$ 0** | Uso familiar. Firestore free: ~1 GiB armazenado, 50 mil leituras + 20 mil escritas **por dia**, Auth ilimitado. Sobra muito para alguns aparelhos. |
+| **Blaze (pago por uso)** | Só paga o que exceder o free | Necessário apenas se um dia enviar push via Cloud Functions ou crescer muito. |
+
+Recomendação: comece no **Spark (grátis)** — para controle parental de família
+não há custo. Escolha a região do Firestore mais perto (ex.: `southamerica-east1`,
+São Paulo) ao criar o banco, para menor latência.
 
 ## CI/CD → Play Store
 
@@ -135,7 +172,7 @@ git tag v1.0.0 && git push origin v1.0.0
 ```
 app/src/main/java/com/morpheus/family/
 ├── MorpheusApp.kt            # canais de notificação
-├── admin/                    # Device Admin (anti-desinstalação)
+├── admin/                    # Device Admin (anti-desinstalação) + ProtectionManager (release)
 ├── vpn/                      # VpnService de bloqueio
 ├── schedule/                 # motor de decisão + alarmes
 ├── service/                  # GuardianService (foreground + sync)

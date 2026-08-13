@@ -10,6 +10,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.firebase.firestore.ListenerRegistration
 import com.morpheus.family.MorpheusApp
 import com.morpheus.family.R
+import com.morpheus.family.admin.ProtectionManager
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.schedule.ScheduleEnforcer
@@ -35,16 +36,25 @@ class GuardianService : LifecycleService() {
     /** Subscribe to the parent's live policy updates (no-op without Firebase). */
     private fun startRemoteSync() {
         val ctx = applicationContext
+        RemoteRepository.ensureSignedIn(ctx)
         lifecycleScope.launch {
             val prefs = Prefs(ctx)
             // Re-attach the Firestore listener whenever the paired id changes.
             prefs.pairedIdFlow.collect { pairId ->
                 policyListener?.remove()
                 policyListener = if (pairId.isNullOrBlank()) null else
-                    RemoteRepository.listenPolicy(ctx, pairId) { schedule ->
+                    RemoteRepository.listenPolicy(ctx, pairId) { policy ->
                         lifecycleScope.launch {
-                            prefs.setSchedule(schedule)
-                            ScheduleEnforcer.apply(ctx)
+                            if (policy.releaseRequestedAt > prefs.lastRelease()) {
+                                // Parent asked to remove protection: disable the
+                                // schedule, remember the request, then tear down.
+                                prefs.setLastRelease(policy.releaseRequestedAt)
+                                prefs.setSchedule(policy.schedule.copy(enabled = false))
+                                ProtectionManager.release(ctx)
+                            } else {
+                                prefs.setSchedule(policy.schedule)
+                                ScheduleEnforcer.apply(ctx)
+                            }
                         }
                     }
             }
