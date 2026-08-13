@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
+import android.os.Build
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
 import com.morpheus.family.receiver.ScheduleAlarmReceiver
@@ -48,8 +49,12 @@ object ScheduleEnforcer {
             Intent(context, ScheduleAlarmReceiver::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        // canScheduleExactAlarms() exists only on API 31+; before that, exact
+        // alarms need no special permission, so schedule them directly.
+        val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            am.canScheduleExactAlarms()
         runCatching {
-            if (am.canScheduleExactAlarms()) {
+            if (canExact) {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)
             } else {
                 am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, next, pi)
