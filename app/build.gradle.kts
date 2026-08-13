@@ -23,12 +23,12 @@ val keystoreProps = Properties().apply {
 
 android {
     namespace = "com.morpheus.family"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.morpheus.family"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         // versionCode auto-increments in CI (VERSION_CODE = run_number + offset)
         // so every Play upload is unique and increasing; defaults to 1 locally.
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
@@ -91,6 +91,7 @@ dependencies {
 
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.5")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.5")
     implementation("androidx.lifecycle:lifecycle-service:2.8.5")
     implementation("androidx.activity:activity-compose:1.9.2")
 
@@ -106,6 +107,9 @@ dependencies {
 
     // JSON serialization for the richer app-policy model (JVM-pure, unit-testable).
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+
+    // QR pairing: generate on the child, scan on the parent (bundles zxing core).
+    implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
     // Location (child location for the parent, geofence, SOS).
     implementation("com.google.android.gms:play-services-location:21.3.0")

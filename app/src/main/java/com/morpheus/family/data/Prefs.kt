@@ -40,6 +40,10 @@ class Prefs(private val context: Context) {
 
         // Child side: last known geofence membership (null until first fix).
         val GEOFENCE_INSIDE = booleanPreferencesKey("geofence_inside")
+
+        // Persisted trusted-time anchor (survives process death, not reboot).
+        val ANCHOR_UTC = longPreferencesKey("anchor_utc")
+        val ANCHOR_ELAPSED = longPreferencesKey("anchor_elapsed")
     }
 
     val modeFlow: Flow<AppMode> = context.dataStore.data.map { p ->
@@ -101,6 +105,19 @@ class Prefs(private val context: Context) {
     suspend fun geofenceInside(): Boolean? = context.dataStore.data.first()[Keys.GEOFENCE_INSIDE]
     suspend fun setGeofenceInside(inside: Boolean) =
         context.dataStore.edit { it[Keys.GEOFENCE_INSIDE] = inside }
+
+    // Trusted-time anchor: (trustedUtcMillis, elapsedRealtimeAtAnchor). Null if unset.
+    suspend fun timeAnchor(): Pair<Long, Long>? {
+        val p = context.dataStore.data.first()
+        val utc = p[Keys.ANCHOR_UTC] ?: 0L
+        val elapsed = p[Keys.ANCHOR_ELAPSED] ?: 0L
+        return if (utc > 0L) utc to elapsed else null
+    }
+
+    suspend fun setTimeAnchor(utcMillis: Long, elapsed: Long) = context.dataStore.edit {
+        it[Keys.ANCHOR_UTC] = utcMillis
+        it[Keys.ANCHOR_ELAPSED] = elapsed
+    }
 
     // ---- Parent side: multiple managed children -------------------------------
 

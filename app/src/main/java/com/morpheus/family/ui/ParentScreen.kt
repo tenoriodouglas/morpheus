@@ -33,7 +33,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
 import com.google.firebase.firestore.ListenerRegistration
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import com.morpheus.family.data.BlockWindow
 import com.morpheus.family.data.ChildRef
 import com.morpheus.family.data.KnownApps
@@ -224,10 +227,28 @@ private fun ParentDashboard(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+                    result.contents?.let { raw ->
+                        codeInput = raw.removePrefix(QR_PREFIX).trim().uppercase()
+                    }
+                }
+                Button(
+                    onClick = {
+                        scanLauncher.launch(
+                            ScanOptions()
+                                .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                                .setPrompt("Aponte para o QR no celular do filho")
+                                .setBeepEnabled(false)
+                                .setOrientationLocked(false),
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("📷 Escanear QR do filho") }
+
                 OutlinedTextField(
                     value = codeInput,
                     onValueChange = { codeInput = it.uppercase() },
-                    label = { Text("Código exibido no celular do filho") },
+                    label = { Text("Ou digite o código exibido no celular do filho") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -237,6 +258,7 @@ private fun ParentDashboard(
                         if (id.isNotBlank()) {
                             scope.launch {
                                 prefs.upsertChild(ChildRef(id, nameInput.trim().ifBlank { id }))
+                                RemoteRepository.joinMembership(context, id)
                                 // Seed the child with the default schedule and push it.
                                 val seed = prefs.childSchedule(id)
                                 prefs.setChildSchedule(id, seed)
@@ -350,6 +372,17 @@ private fun SecurityPinCard(prefs: Prefs) {
     }
 }
 
+private fun connectionStatus(lastSeen: Long): String {
+    if (lastSeen <= 0L) return "⚪ Sem sinal recente"
+    val min = (System.currentTimeMillis() - lastSeen) / 60000
+    return when {
+        min < 5 -> "🟢 Online"
+        min < 60 -> "🟡 Visto há $min min"
+        min < 1440 -> "⚪ Visto há ${min / 60} h"
+        else -> "⚪ Visto há ${min / 1440} d"
+    }
+}
+
 @Composable
 private fun ChildCard(
     prefs: Prefs,
@@ -358,13 +391,23 @@ private fun ChildCard(
     onBlockNow: () -> Unit,
     onRequestRelease: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val remoteAvailable = remember { RemoteRepository.available(context) }
     val schedule by prefs.childScheduleFlow(child.id).collectAsState(initial = Schedule())
     val s = schedule ?: Schedule()
+
+    var lastSeen by remember { mutableStateOf(0L) }
+    DisposableEffect(child.id, remoteAvailable) {
+        val reg = if (remoteAvailable)
+            RemoteRepository.listenHeartbeat(context, child.id) { lastSeen = it } else null
+        onDispose { reg?.remove() }
+    }
 
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(child.name, style = MaterialTheme.typography.titleLarge)
             Text("Código: ${child.id}", style = MaterialTheme.typography.bodySmall)
+            Text(connectionStatus(lastSeen), style = MaterialTheme.typography.bodySmall)
             Text(
                 if (!s.enabled) "Bloqueio desligado"
                 else "Janelas: " + s.windows.joinToString(", ") { it.label() },

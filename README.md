@@ -77,6 +77,17 @@ janela de bloqueio, limite diário), o tempo total de tela e as restrições.
 > rastreamento contínuo em background robusto, adicione o tipo de serviço em
 > foreground `location`. O filtro de conteúdo por DNS requer **Device Owner**.
 
+## Otimizações (Fase 3)
+
+| Recurso | Detalhe |
+| --- | --- |
+| **Pareamento por QR** | O filho exibe um QR; o pai escaneia (câmera). **Digitação manual** continua disponível como alternativa. |
+| **Checklist de setup ao vivo** | Cada permissão do filho mostra ✓/○ e atualiza ao voltar das Configurações; exibe "Tudo pronto" quando o essencial está ativo. |
+| **Status de conexão** | Heartbeat no Firestore; o painel do pai mostra 🟢 Online / 🟡 visto há N min por filho. |
+| **Segurança Firestore (TOFU)** | Regras por **membros**: os dois primeiros aparelhos (pai+filho) reivindicam a posse; depois, mais ninguém acessa mesmo sabendo o código. Ver [`firestore.rules`](firestore.rules). |
+| **Âncora de hora persistida** | A hora confiável sobrevive ao encerramento do processo (re-sincroniza após reboot), reforçando o anti-burla. |
+| **Prontidão Play** | `targetSdk 35` (AGP 8.7), strings em Inglês (`values-en`) para textos do sistema, e [política de privacidade](docs/PRIVACY.md). |
+
 ## Fluxo de uso
 
 1. Instale o APK/AAB em cada celular.
@@ -85,8 +96,9 @@ janela de bloqueio, limite diário), o tempo total de tela e as restrições.
    anti-desinstalação → desativar otimização de bateria). Um **código de
    pareamento** aparece na tela.
 3. No **celular do responsável**: escolha "Este é o celular do RESPONSÁVEL". O app
-   abre um **painel de filhos**. Para cada filho, informe um nome e o código
-   exibido no celular dele e toque em "Conectar filho".
+   abre um **painel de filhos**. Informe um nome e **escaneie o QR** exibido no
+   celular do filho (ou digite o código, caso não consiga ler o QR), e toque em
+   "Conectar filho".
 4. Toque em um filho no painel para editar as janelas de bloqueio dele ou usar
    "Bloquear agora". Cada filho tem sua **própria agenda**, aplicada de forma
    independente.

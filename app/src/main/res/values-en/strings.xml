@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">Morpheus</string>
+
+    <!-- Device admin -->
+    <string name="device_admin_label">Morpheus Parental Control</string>
+    <string name="device_admin_description">Lets Morpheus enforce the schedule set by the guardian and prevents uninstalling while protection is active.</string>
+
+    <!-- Notifications -->
+    <string name="channel_status_name">Managed device status</string>
+    <string name="channel_status_desc">Permanent notice that this device is managed by Morpheus.</string>
+    <string name="managed_title">Device managed by Morpheus</string>
+    <string name="managed_text">Usage schedule is set by the guardian.</string>
+    <string name="blocked_text">Internet blocked by the schedule set by the guardian.</string>
+
+    <!-- Accessibility (app-block fallback) -->
+    <string name="a11y_description">Lets Morpheus enforce the app blocks set by the guardian, showing a notice when a blocked app is opened.</string>
+</resources>

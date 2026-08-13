@@ -6,12 +6,29 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // One document per child, keyed by the child's pairing code.
-    // Requires an authenticated caller — the app signs in with Anonymous Auth,
-    // so enable Authentication > Sign-in method > Anonymous in the Firebase
-    // console. Effective access is gated by knowing the child's pairing code
-    // (childId), which the child generates as an 8-char random value.
+    //
+    // Access model: authenticated (Anonymous Auth) + trust-on-first-use
+    // membership. The first two devices that touch the document — the child and
+    // the parent who scanned/typed the pairing code — claim membership by adding
+    // their uid to `members`. Once two members exist, no one else can read or
+    // write, even if they learn the pairing code. Enable Authentication >
+    // Sign-in method > Anonymous in the Firebase console.
     match /families/{childId} {
-      allow read, write: if request.auth != null;
+      function members() {
+        return ('members' in resource.data) ? resource.data.members : [];
+      }
+      function isMember() {
+        return request.auth != null && request.auth.uid in members();
+      }
+      function bootstrapping() {
+        // No members yet, or still room for the second (parent+child) device.
+        return members().size() < 2;
+      }
+
+      allow create: if request.auth != null;
+      allow read:   if isMember() || (request.auth != null && members().size() == 0);
+      allow update: if isMember() || (request.auth != null && bootstrapping());
+      allow delete: if false;
     }
 
     // Everything else is denied by default.
@@ -21,7 +38,6 @@ service cloud.firestore {
   }
 }
 
-// Hardening note: for stronger isolation between families, add a membership
-// model — e.g. store the parent and child uids on each document at pairing time
-// and require request.auth.uid to be in that set. That requires a small pairing
-// handshake and is a good next step for a production release.
+// Note: this TOFU model caps a family at two devices (one child + one parent).
+// To support multiple parents, raise the bootstrap size and have an existing
+// member add the new uid.

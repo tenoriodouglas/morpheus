@@ -3,6 +3,7 @@ package com.morpheus.family.ui
 import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
 import android.provider.Settings
@@ -14,14 +15,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -29,12 +33,18 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.morpheus.family.admin.MorpheusDeviceAdminReceiver
 import com.morpheus.family.data.Geofence
 import com.morpheus.family.data.Prefs
+import com.morpheus.family.enforcement.UsageTracker
 import com.morpheus.family.location.LocationReporter
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.service.GuardianService
@@ -77,8 +87,27 @@ fun ChildScreen(prefs: Prefs) {
         ActivityResultContracts.StartActivityForResult(),
     ) { refresh++ }
 
+    // Refresh the live checklist whenever we return from a Settings screen.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refresh++
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
+    val notifReady = remember(refresh) {
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+    }
     val vpnReady = remember(refresh) { VpnService.prepare(context) == null }
     val adminReady = remember(refresh) { isAdminActive(context) }
+    val a11yReady = remember(refresh) { isAccessibilityEnabled(context) }
+    val usageReady = remember(refresh) { UsageTracker.hasUsageAccess(context) }
+    val locReady = remember(refresh) { LocationReporter.hasPermission(context) }
+    val coreReady = notifReady && vpnReady && adminReady
 
     Column(
         modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
@@ -87,42 +116,57 @@ fun ChildScreen(prefs: Prefs) {
         Text("Modo Filho", style = MaterialTheme.typography.headlineMedium)
 
         Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text("Código de pareamento", style = MaterialTheme.typography.labelLarge)
+            Column(
+                Modifier.fillMaxWidth().padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Pareamento", style = MaterialTheme.typography.labelLarge)
+                pairId?.let { code ->
+                    QrCode(QR_PREFIX + code, modifier = Modifier.size(200.dp))
+                }
+                Text(pairId ?: "…", style = MaterialTheme.typography.headlineLarge)
                 Text(
-                    pairId ?: "…",
-                    style = MaterialTheme.typography.headlineLarge,
-                )
-                Text(
-                    "Digite este código no celular do responsável para conectar os dois aparelhos.",
+                    "Escaneie este QR no celular do responsável — ou digite o código acima, " +
+                        "caso não consiga ler o QR.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
         }
 
-        Text("Ative as proteções (uma única vez):", style = MaterialTheme.typography.titleMedium)
+        if (coreReady) {
+            Card(Modifier.fillMaxWidth()) {
+                Text(
+                    "✅ Tudo pronto! Este aparelho está protegido.",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
+        } else {
+            Text("Ative as proteções (uma única vez):", style = MaterialTheme.typography.titleMedium)
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            SetupButton("1. Permitir notificações") {
+            SetupButton(notifReady, "Permitir notificações") {
                 notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             }
         }
-        SetupButton(if (vpnReady) "2. Bloqueio de internet: OK" else "2. Autorizar bloqueio de internet") {
+        SetupButton(vpnReady, "Autorizar bloqueio de internet") {
             VpnService.prepare(context)?.let { vpnLauncher.launch(it) } ?: run { refresh++ }
         }
-        SetupButton(if (adminReady) "3. Proteção anti-desinstalação: OK" else "3. Ativar proteção anti-desinstalação") {
+        SetupButton(adminReady, "Ativar proteção anti-desinstalação") {
             adminLauncher.launch(adminIntent(context))
         }
-        SetupButton("4. Desativar otimização de bateria") {
+        SetupButton(null, "Desativar otimização de bateria") {
             runCatching { context.startActivity(batteryIntent()) }
         }
-        SetupButton("5. Ativar bloqueio de apps (Acessibilidade)") {
+        SetupButton(a11yReady, "Ativar bloqueio de apps (Acessibilidade)") {
             runCatching { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         }
-        SetupButton("6. Permitir acesso de uso (limites por app)") {
+        SetupButton(usageReady, "Permitir acesso de uso (limites por app)") {
             runCatching { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
         }
-        SetupButton("7. Permitir localização (mapa e SOS)") {
+        SetupButton(locReady, "Permitir localização (mapa e SOS)") {
             locationLauncher.launch(
                 arrayOf(
                     android.Manifest.permission.ACCESS_FINE_LOCATION,
@@ -131,8 +175,8 @@ fun ChildScreen(prefs: Prefs) {
             )
         }
         Text(
-            "Passos 5 a 7 habilitam bloqueio de apps, limites diários e localização " +
-                "(passos 5 e 6 não são necessários no modo Device Owner).",
+            "Acessibilidade, acesso de uso e localização habilitam bloqueio de apps, " +
+                "limites diários e mapa (não necessários no modo Device Owner).",
             style = MaterialTheme.typography.bodySmall,
         )
 
@@ -186,15 +230,35 @@ fun ChildScreen(prefs: Prefs) {
 }
 
 @Composable
-private fun SetupButton(label: String, onClick: () -> Unit) {
-    Button(onClick = onClick, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-        Text(label)
+private fun SetupButton(done: Boolean?, label: String, onClick: () -> Unit) {
+    val prefix = when (done) {
+        true -> "✓  "
+        false -> "○  "
+        null -> ""
+    }
+    if (done == true) {
+        OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+            Text(prefix + label)
+        }
+    } else {
+        Button(onClick = onClick, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+            Text(prefix + label)
+        }
     }
 }
 
 private fun isAdminActive(context: Context): Boolean {
     val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
     return dpm.isAdminActive(MorpheusDeviceAdminReceiver.component(context))
+}
+
+/** Whether our AppBlockAccessibilityService is enabled in system settings. */
+private fun isAccessibilityEnabled(context: Context): Boolean {
+    val flat = Settings.Secure.getString(
+        context.contentResolver,
+        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+    ) ?: return false
+    return flat.split(':').any { it.contains(context.packageName, ignoreCase = true) }
 }
 
 private fun adminIntent(context: Context): Intent =

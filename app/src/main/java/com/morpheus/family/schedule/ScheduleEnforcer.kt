@@ -33,7 +33,7 @@ object ScheduleEnforcer {
         val schedule = runBlocking { prefs.schedule() }
         val appPolicy = runBlocking { prefs.appPolicy() }
 
-        val t = TrustedTimeProvider.now()
+        val t = TrustedTimeProvider.now(context)
         var blocked = schedule.isBlockedAt(t.millis)
 
         // Homework/focus mode also blocks internet.
@@ -63,7 +63,7 @@ object ScheduleEnforcer {
 
     /** Refresh trusted network time, enforce, then upload telemetry. */
     suspend fun syncAndApply(context: Context) {
-        runCatching { TrustedTimeProvider.sync() }
+        runCatching { TrustedTimeProvider.sync(context) }
         apply(context)
         runCatching { uploadTelemetry(context) }
     }
@@ -75,6 +75,10 @@ object ScheduleEnforcer {
         if (pairId.isBlank()) return
         val appPolicy = prefs.appPolicy()
         val now = System.currentTimeMillis()
+
+        // Claim membership (security) and report a heartbeat (online status).
+        RemoteRepository.joinMembership(context, pairId)
+        RemoteRepository.reportHeartbeat(context, pairId, now)
 
         LocationReporter.reportOnce(context, pairId, appPolicy.geofence, now)
 
