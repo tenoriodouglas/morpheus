@@ -45,12 +45,23 @@ C++/NDK só compensa para cálculo pesado (áudio/vídeo/jogos), o que não é o
 
 ## Fluxo de uso
 
-1. Instale o APK/AAB nos dois celulares.
-2. No **celular do filho**: escolha "Este é o celular do FILHO", conclua o setup
-   (notificações → autorizar bloqueio de internet → ativar anti-desinstalação →
-   desativar otimização de bateria). Um **código de pareamento** aparece na tela.
-3. No **celular do responsável**: escolha "Este é o celular do RESPONSÁVEL",
-   digite o código do filho, defina as janelas de bloqueio e envie.
+1. Instale o APK/AAB em cada celular.
+2. Em **cada celular de filho**: escolha "Este é o celular do FILHO", conclua o
+   setup (notificações → autorizar bloqueio de internet → ativar
+   anti-desinstalação → desativar otimização de bateria). Um **código de
+   pareamento** aparece na tela.
+3. No **celular do responsável**: escolha "Este é o celular do RESPONSÁVEL". O app
+   abre um **painel de filhos**. Para cada filho, informe um nome e o código
+   exibido no celular dele e toque em "Conectar filho".
+4. Toque em um filho no painel para editar as janelas de bloqueio dele ou usar
+   "Bloquear agora". Cada filho tem sua **própria agenda**, aplicada de forma
+   independente.
+
+### Vários filhos, um só responsável
+
+O modo responsável gerencia **quantos filhos você quiser**. Cada filho é um
+documento próprio no Firestore (`families/{códigoDoFilho}`) e recebe apenas a
+sua política — o celular de um filho nunca é afetado pela regra de outro.
 
 ## Build local
 
@@ -87,7 +98,10 @@ responsável controlar o filho à distância:
 3. Baixe o `google-services.json` e coloque em `app/google-services.json`
    (ignorado pelo git). O plugin do Google Services é aplicado automaticamente
    quando o arquivo existe.
-4. Regras sugeridas do Firestore: restrinja `families/{pairId}` para exigir auth.
+4. Estrutura no Firestore: um documento por filho em
+   `families/{códigoDoFilho}` com o campo `scheduleJson`. O responsável escreve;
+   cada celular de filho escuta o **seu** documento em tempo real.
+5. Regras sugeridas do Firestore: restrinja `families/{childId}` para exigir auth.
 
 ## CI/CD → Play Store
 
@@ -127,6 +141,15 @@ app/src/main/java/com/morpheus/family/
 ├── service/                  # GuardianService (foreground + sync)
 ├── receiver/                 # boot + alarme de horário
 ├── remote/                   # Firebase (Firestore + FCM), opcional
-├── data/                     # modo, Schedule, DataStore
-└── ui/                       # Compose: seleção de modo, filho, responsável
+├── data/                     # modo, Schedule, ChildRef, DataStore
+└── ui/                       # Compose: seleção de modo, filho, painel do responsável
 ```
+
+## Referência
+
+O CI/CD e o fluxo de publicação na Play Store seguem o padrão do app
+[`gps_speed`](https://github.com/tenoriodouglas/gps_speed) (deploy via
+`r0adkll/upload-google-play`, keystore em base64, AAB assinado como artifact).
+O `gps_speed` é em Flutter; o Morpheus é **Kotlin nativo** porque o motor de
+bloqueio depende de APIs de sistema (VpnService, Device Admin) que são nativas —
+o que também o mantém leve.

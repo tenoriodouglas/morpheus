@@ -28,7 +28,9 @@ android {
         applicationId = "com.morpheus.family"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
+        // versionCode auto-increments in CI (VERSION_CODE = run_number + offset)
+        // so every Play upload is unique and increasing; defaults to 1 locally.
+        versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
         versionName = "1.0.0"
         vectorDrawables { useSupportLibrary = true }
     }

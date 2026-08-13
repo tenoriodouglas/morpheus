@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -17,48 +16,175 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.morpheus.family.data.BlockWindow
+import com.morpheus.family.data.ChildRef
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
 import com.morpheus.family.remote.RemoteRepository
 import kotlinx.coroutines.launch
 
 /**
- * Parent device: enters the child's pairing code, edits the block schedule and
- * pushes it. When Firebase is configured, changes reach the child in real time;
- * otherwise this screen still edits the local policy (useful on the child device
- * itself, or for a single-phone setup).
+ * Parent device. A dashboard lists every managed child; selecting one opens its
+ * own schedule editor. Each child has an independent policy pushed to its own
+ * Firestore document, so one parent phone controls many child phones.
  */
 @Composable
 fun ParentScreen(prefs: Prefs) {
+    var selectedChildId by remember { mutableStateOf<String?>(null) }
+    val children by prefs.childrenFlow.collectAsState(initial = emptyList())
+
+    val selected = children.firstOrNull { it.id == selectedChildId }
+    if (selected != null) {
+        ChildScheduleEditor(prefs, selected, onBack = { selectedChildId = null })
+    } else {
+        ParentDashboard(prefs, children, onOpenChild = { selectedChildId = it })
+    }
+}
+
+@Composable
+private fun ParentDashboard(
+    prefs: Prefs,
+    children: List<ChildRef>,
+    onOpenChild: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val remoteAvailable = remember { RemoteRepository.available(context) }
+
+    var codeInput by remember { mutableStateOf("") }
+    var nameInput by remember { mutableStateOf("") }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Text("Modo Responsável", style = MaterialTheme.typography.headlineMedium)
+
+        if (!remoteAvailable) {
+            Text(
+                "Firebase não configurado neste build — as regras são salvas localmente. " +
+                    "Ative o Firebase (veja o README) para controlar os filhos à distância.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+
+        // Add a child.
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Adicionar um filho", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { Text("Nome (ex.: João)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = codeInput,
+                    onValueChange = { codeInput = it.uppercase() },
+                    label = { Text("Código exibido no celular do filho") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Button(
+                    onClick = {
+                        val id = codeInput.trim()
+                        if (id.isNotBlank()) {
+                            scope.launch {
+                                prefs.upsertChild(ChildRef(id, nameInput.trim().ifBlank { id }))
+                                // Seed the child with the default schedule and push it.
+                                val seed = prefs.childSchedule(id)
+                                prefs.setChildSchedule(id, seed)
+                                RemoteRepository.pushPolicy(context, id, seed)
+                                codeInput = ""; nameInput = ""
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Conectar filho") }
+            }
+        }
+
+        Text(
+            if (children.isEmpty()) "Nenhum filho conectado ainda."
+            else "Filhos conectados (${children.size})",
+            style = MaterialTheme.typography.titleMedium,
+        )
+
+        children.forEach { child ->
+            ChildCard(
+                prefs = prefs,
+                child = child,
+                onOpen = { onOpenChild(child.id) },
+                onBlockNow = {
+                    scope.launch {
+                        val s = prefs.childSchedule(child.id)
+                            .copy(manualBlockUntil = System.currentTimeMillis() + 60 * 60 * 1000)
+                        prefs.setChildSchedule(child.id, s)
+                        RemoteRepository.pushPolicy(context, child.id, s)
+                    }
+                },
+                onRemove = { scope.launch { prefs.removeChild(child.id) } },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChildCard(
+    prefs: Prefs,
+    child: ChildRef,
+    onOpen: () -> Unit,
+    onBlockNow: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val schedule by prefs.childScheduleFlow(child.id).collectAsState(initial = Schedule())
+    val s = schedule ?: Schedule()
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(child.name, style = MaterialTheme.typography.titleLarge)
+            Text("Código: ${child.id}", style = MaterialTheme.typography.bodySmall)
+            Text(
+                if (!s.enabled) "Bloqueio desligado"
+                else "Janelas: " + s.windows.joinToString(", ") { it.label() },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onOpen) { Text("Editar horários") }
+                OutlinedButton(onClick = onBlockNow) { Text("Bloquear 1h") }
+            }
+            TextButton(onClick = onRemove) { Text("Remover filho") }
+        }
+    }
+}
+
+@Composable
+private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val pairId by prefs.pairedIdFlow.collectAsState(initial = null)
-    val schedule by prefs.scheduleFlow.collectAsState(initial = Schedule())
-
-    var codeInput by remember { mutableStateOf("") }
-    val remoteAvailable = remember { RemoteRepository.available(context) }
-
+    val schedule by prefs.childScheduleFlow(child.id).collectAsState(initial = Schedule())
     val current = schedule ?: Schedule()
     val window = current.windows.firstOrNull() ?: BlockWindow(22 * 60, 6 * 60 + 30)
 
     fun persist(newSchedule: Schedule) {
         scope.launch {
-            prefs.setSchedule(newSchedule)
-            pairId?.let { RemoteRepository.pushPolicy(context, it, newSchedule) }
+            prefs.setChildSchedule(child.id, newSchedule)
+            RemoteRepository.pushPolicy(context, child.id, newSchedule)
         }
     }
 
@@ -71,38 +197,10 @@ fun ParentScreen(prefs: Prefs) {
         modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text("Modo Responsável", style = MaterialTheme.typography.headlineMedium)
+        TextButton(onClick = onBack) { Text("← Voltar aos filhos") }
+        Text(child.name, style = MaterialTheme.typography.headlineMedium)
+        Text("Código: ${child.id}", style = MaterialTheme.typography.bodySmall)
 
-        // Pairing.
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Parear com o celular do filho", style = MaterialTheme.typography.titleMedium)
-                if (pairId.isNullOrBlank()) {
-                    OutlinedTextField(
-                        value = codeInput,
-                        onValueChange = { codeInput = it.uppercase() },
-                        label = { Text("Código exibido no celular do filho") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Button(
-                        onClick = { if (codeInput.isNotBlank()) scope.launch { prefs.setPairedId(codeInput.trim()) } },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text("Conectar") }
-                } else {
-                    Text("Pareado: $pairId")
-                    if (!remoteAvailable) {
-                        Text(
-                            "Firebase não configurado neste build — as mudanças só se aplicam localmente. " +
-                                "Veja o README para ativar o controle remoto.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                }
-            }
-        }
-
-        // Master switch.
         Card(Modifier.fillMaxWidth()) {
             Row(
                 Modifier.fillMaxWidth().padding(16.dp),
@@ -117,7 +215,6 @@ fun ParentScreen(prefs: Prefs) {
             }
         }
 
-        // Window editor.
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Janela de bloqueio", style = MaterialTheme.typography.titleMedium)
@@ -128,13 +225,12 @@ fun ParentScreen(prefs: Prefs) {
                     updateWindow(window.copy(endMinutes = it))
                 }
                 Text(
-                    "Durante esta janela, a internet do celular do filho fica bloqueada.",
+                    "Durante esta janela, a internet do celular de ${child.name} fica bloqueada.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
         }
 
-        // Immediate block.
         Button(
             onClick = {
                 persist(current.copy(manualBlockUntil = System.currentTimeMillis() + 60 * 60 * 1000))
