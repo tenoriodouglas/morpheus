@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">Morpheus</string>
+
+    <!-- Device admin -->
+    <string name="device_admin_label">Morpheus Controle Parental</string>
+    <string name="device_admin_description">Permite que o Morpheus aplique os horários definidos pelo responsável e impede a desinstalação enquanto a proteção estiver ativa.</string>
+
+    <!-- Notifications -->
+    <string name="channel_status_name">Status do dispositivo gerenciado</string>
+    <string name="channel_status_desc">Aviso permanente de que este dispositivo é gerenciado pelo Morpheus.</string>
+    <string name="managed_title">Dispositivo gerenciado pelo Morpheus</string>
+    <string name="managed_text">Os horários de uso são definidos pelo responsável.</string>
+    <string name="blocked_text">Internet bloqueada pelo horário definido pelo responsável.</string>
+</resources>

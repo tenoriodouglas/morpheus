@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<device-admin xmlns:android="http://schemas.android.com/apk/res/android"
+    android:visible="true">
+    <uses-policies>
+        <disable-camera />
+        <force-lock />
+        <watch-login />
+    </uses-policies>
+</device-admin>
