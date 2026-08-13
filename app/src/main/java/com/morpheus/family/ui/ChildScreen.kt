@@ -180,6 +180,24 @@ fun ChildScreen(prefs: Prefs) {
             style = MaterialTheme.typography.bodySmall,
         )
 
+        Spacer(Modifier.height(4.dp))
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Níveis de proteção contra remoção", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "• Device Admin (atual): pode ser desativado em Configurações → Segurança → " +
+                        "Apps de administração. Se isso acontecer, o responsável é avisado na hora.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    "• Device Owner (máximo): impossível de desinstalar. É configurado ao resetar o " +
+                        "aparelho e escanear o QR de provisionamento no assistente inicial — sem " +
+                        "precisar de computador. Recomendado para proteção total.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
         Spacer(Modifier.height(8.dp))
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp)) {

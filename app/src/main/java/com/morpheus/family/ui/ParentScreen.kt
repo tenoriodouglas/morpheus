@@ -184,6 +184,7 @@ private fun ParentDashboard(
                     "sos" -> "🆘 SOS — pedido de ajuda!"
                     "geofence_enter" -> "chegou na área monitorada"
                     "geofence_exit" -> "saiu da área monitorada"
+                    "protection_removed" -> "⛔ a proteção foi REMOVIDA neste aparelho!"
                     else -> "evento de segurança"
                 }
                 Card(Modifier.fillMaxWidth()) {

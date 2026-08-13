@@ -126,6 +126,13 @@ Configurações → Segurança → Apps de administração → Morpheus → Desa
 desinstalar. Em Device Owner sem rede, o último recurso é `adb shell dpm
 remove-active-admin ...` ou reset de fábrica.
 
+**Se o filho tentar remover:** no modo **Device Admin**, ele consegue desativar a
+administração (com fricção), mas o **responsável é avisado na hora** — o
+`onDisabled` envia um alerta `protection_removed` ao painel do pai. No modo
+**Device Owner** a remoção é bloqueada de vez. O modo Device Owner pode ser
+configurado **sem computador**, escaneando um QR de provisionamento no assistente
+inicial do aparelho (após reset de fábrica).
+
 ## Build local
 
 Pré-requisitos: JDK 17 e Android SDK (via Android Studio ou `sdkmanager`).
