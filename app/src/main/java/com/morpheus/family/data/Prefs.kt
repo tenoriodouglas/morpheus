@@ -37,6 +37,9 @@ class Prefs(private val context: Context) {
 
         // Parent side: optional PIN (stored hashed) gating the parent UI.
         val PARENT_PIN = stringPreferencesKey("parent_pin")
+
+        // Child side: last known geofence membership (null until first fix).
+        val GEOFENCE_INSIDE = booleanPreferencesKey("geofence_inside")
     }
 
     val modeFlow: Flow<AppMode> = context.dataStore.data.map { p ->
@@ -94,6 +97,11 @@ class Prefs(private val context: Context) {
         if (hash == null) it.remove(Keys.PARENT_PIN) else it[Keys.PARENT_PIN] = hash
     }
 
+    // Child geofence membership (null until first fix).
+    suspend fun geofenceInside(): Boolean? = context.dataStore.data.first()[Keys.GEOFENCE_INSIDE]
+    suspend fun setGeofenceInside(inside: Boolean) =
+        context.dataStore.edit { it[Keys.GEOFENCE_INSIDE] = inside }
+
     // ---- Parent side: multiple managed children -------------------------------
 
     val childrenFlow: Flow<List<ChildRef>> = context.dataStore.data.map { p ->
@@ -145,23 +153,24 @@ class Prefs(private val context: Context) {
 
         // Compact, dependency-free wire format so the same string round-trips in
         // DataStore and Firestore and can be unit-tested on a plain JVM:
-        //   "<enabled 0|1>|<manualBlockUntil>|<win>;<win>;..."
+        //   "<enabled 0|1>|<manualBlockUntil>|<allowUntil>|<win>;<win>;..."
         //   win = "<start>,<end>,<day.day.day>"
 
         fun encodeSchedule(s: Schedule): String {
             val windows = s.windows.joinToString(";") { w ->
                 "${w.startMinutes},${w.endMinutes},${w.days.sorted().joinToString(".")}"
             }
-            return "${if (s.enabled) 1 else 0}|${s.manualBlockUntil}|$windows"
+            return "${if (s.enabled) 1 else 0}|${s.manualBlockUntil}|${s.allowUntil}|$windows"
         }
 
         fun decodeSchedule(raw: String?): Schedule {
             if (raw.isNullOrBlank()) return Schedule()
             return runCatching {
-                val parts = raw.split("|", limit = 3)
+                val parts = raw.split("|", limit = 4)
                 val enabled = parts[0] == "1"
                 val manual = parts.getOrNull(1)?.toLongOrNull() ?: 0L
-                val windows = (parts.getOrNull(2) ?: "")
+                val allow = parts.getOrNull(2)?.toLongOrNull() ?: 0L
+                val windows = (parts.getOrNull(3) ?: "")
                     .split(";")
                     .filter { it.isNotBlank() }
                     .map { seg ->
@@ -178,6 +187,7 @@ class Prefs(private val context: Context) {
                     enabled = enabled,
                     windows = windows.ifEmpty { Schedule().windows },
                     manualBlockUntil = manual,
+                    allowUntil = allow,
                 )
             }.getOrDefault(Schedule())
         }

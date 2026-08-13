@@ -42,6 +42,22 @@ object UsageTracker {
         return (totalMs / 60000L).toInt()
     }
 
+    /** Top [n] apps by foreground minutes since local midnight. */
+    fun topAppsToday(context: Context, n: Int = 8): List<Pair<String, Int>> {
+        val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
+        val now = System.currentTimeMillis()
+        val stats = runCatching {
+            usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, startOfToday(), now)
+        }.getOrNull() ?: return emptyList()
+        return stats
+            .groupBy { it.packageName }
+            .mapValues { (_, list) -> (list.sumOf { it.totalTimeInForeground } / 60000L).toInt() }
+            .filterValues { it > 0 }
+            .entries.sortedByDescending { it.value }
+            .take(n)
+            .map { it.key to it.value }
+    }
+
     /** Total foreground minutes across all apps since local midnight. */
     fun totalTodayMinutes(context: Context): Int {
         val usm = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager

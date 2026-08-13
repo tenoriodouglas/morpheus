@@ -36,6 +36,18 @@ data class DeviceRestrictions(
     val blockAppInstall: Boolean = false,
     val lockDateTime: Boolean = false,
     val requireAutoTime: Boolean = true,
+    // Non-empty = force this DNS-over-TLS host globally (content filtering).
+    val safeDnsHost: String = "",
+)
+
+/** An optional geofence the child evaluates locally on each location update. */
+@Serializable
+data class Geofence(
+    val enabled: Boolean = false,
+    val name: String = "",
+    val lat: Double = 0.0,
+    val lng: Double = 0.0,
+    val radiusMeters: Int = 200,
 )
 
 /**
@@ -50,6 +62,11 @@ data class AppPolicy(
     val apps: List<AppRule> = emptyList(),
     val restrictions: DeviceRestrictions = DeviceRestrictions(),
     val bonusUntil: Long = 0L,
+    // While in the future, homework/focus mode blocks internet and all
+    // non-study apps.
+    val homeworkUntil: Long = 0L,
+    val studyApps: List<String> = emptyList(),
+    val geofence: Geofence = Geofence(),
 ) {
     /** Whether [packageName] should be blocked at [nowMillis] by its windows. */
     fun isAppBlockedByWindow(packageName: String, nowMillis: Long): Boolean {
@@ -57,6 +74,8 @@ data class AppPolicy(
         val rule = apps.firstOrNull { it.packageName == packageName } ?: return false
         return rule.windows.any { Schedule(windows = listOf(it.toDomain())).isBlockedAt(nowMillis) }
     }
+
+    fun homeworkActive(nowMillis: Long): Boolean = homeworkUntil > nowMillis
 
     fun ruleFor(packageName: String): AppRule? = apps.firstOrNull { it.packageName == packageName }
 

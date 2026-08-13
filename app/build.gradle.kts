@@ -107,6 +107,11 @@ dependencies {
     // JSON serialization for the richer app-policy model (JVM-pure, unit-testable).
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
+    // Location (child location for the parent, geofence, SOS).
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    // await() bridge for Play Services Tasks.
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+
     // Firebase (optional remote channel). Guarded at runtime by available().
     implementation(platform("com.google.firebase:firebase-bom:33.3.0"))
     implementation("com.google.firebase:firebase-messaging-ktx")

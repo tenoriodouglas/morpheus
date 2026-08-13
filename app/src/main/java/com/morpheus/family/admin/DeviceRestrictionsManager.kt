@@ -2,6 +2,7 @@ package com.morpheus.family.admin
 
 import android.app.admin.DevicePolicyManager
 import android.content.Context
+import android.os.Build
 import android.os.UserManager
 import com.morpheus.family.data.DeviceRestrictions
 
@@ -20,6 +21,17 @@ object DeviceRestrictionsManager {
         toggle(dpm, admin, UserManager.DISALLOW_INSTALL_APPS, restrictions.blockAppInstall)
         toggle(dpm, admin, UserManager.DISALLOW_CONFIG_DATE_TIME, restrictions.lockDateTime)
         runCatching { dpm.setAutoTimeRequired(admin, restrictions.requireAutoTime) }
+
+        // Content filtering: force a family-safe DNS-over-TLS host globally.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching {
+                if (restrictions.safeDnsHost.isNotBlank()) {
+                    dpm.setGlobalPrivateDnsModeSpecifiedHost(admin, restrictions.safeDnsHost)
+                } else {
+                    dpm.setGlobalPrivateDnsModeOpportunistic(admin)
+                }
+            }
+        }
     }
 
     private fun toggle(

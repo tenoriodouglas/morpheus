@@ -60,6 +60,23 @@ habilitam o bloqueio de apps e os limites diários — não são necessários no
 Device Owner. No **painel do pai**, cada filho tem o editor de apps (escolher app,
 janela de bloqueio, limite diário), o tempo total de tela e as restrições.
 
+## Recursos avançados (Fase 2)
+
+| Recurso | Como funciona |
+| --- | --- |
+| **Pedir mais tempo / SOS (filho)** | O filho pede mais tempo ou envia **SOS** (com localização). Chega ao painel do pai em tempo real; o pai **Aprova +30 min** (concede `allowUntil`/`bonusUntil`) ou nega. |
+| **Localização + mapa** | O filho envia a posição periodicamente; o pai vê a última localização e abre no mapa. |
+| **Geofence** | O pai define uma área (nome, lat/lng, raio); o filho avalia localmente e alerta ao **entrar/sair**. |
+| **Relatório de uso** | O filho envia o resumo de uso do dia (top apps); o pai vê a lista por app. |
+| **Modo dever de casa** | Botão de 1 h que bloqueia internet e todos os apps gerenciados (foco nos estudos). |
+| **Filtro de conteúdo adulto (DNS)** | Em Device Owner, força um DNS-over-TLS família (`family.cloudflare-dns.com`) globalmente. |
+
+> **Privacidade/Play:** localização exige **aviso explícito** (o app mostra sempre
+> o status de dispositivo gerenciado e a política de privacidade deve declarar a
+> coleta de localização). A localização em segundo plano é *best-effort*: para
+> rastreamento contínuo em background robusto, adicione o tipo de serviço em
+> foreground `location`. O filtro de conteúdo por DNS requer **Device Owner**.
+
 ## Fluxo de uso
 
 1. Instale o APK/AAB em cada celular.

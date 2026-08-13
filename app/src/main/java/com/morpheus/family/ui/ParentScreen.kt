@@ -31,14 +31,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.content.Intent
+import android.net.Uri
 import com.google.firebase.firestore.ListenerRegistration
 import com.morpheus.family.data.BlockWindow
 import com.morpheus.family.data.ChildRef
+import com.morpheus.family.data.KnownApps
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.util.Pin
 import kotlinx.coroutines.launch
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -117,8 +122,9 @@ private fun ParentDashboard(
     var nameInput by remember { mutableStateOf("") }
     var confirmRelease by remember { mutableStateOf<ChildRef?>(null) }
 
-    // Listen for tamper alerts from each child (e.g. clock tampering).
+    // Listen for alerts (tamper/SOS/geofence) and requests from each child.
     val alerts = remember { mutableStateMapOf<String, Pair<String, Long>>() }
+    val requests = remember { mutableStateMapOf<String, Triple<String, String, Long>>() }
     DisposableEffect(children, remoteAvailable) {
         val regs = mutableListOf<ListenerRegistration>()
         if (remoteAvailable) {
@@ -126,9 +132,29 @@ private fun ParentDashboard(
                 RemoteRepository.listenAlert(context, child.id) { type, at ->
                     alerts[child.id] = type to at
                 }?.let { regs.add(it) }
+                RemoteRepository.listenRequest(context, child.id) { type, note, at ->
+                    requests[child.id] = Triple(type, note, at)
+                }?.let { regs.add(it) }
             }
         }
         onDispose { regs.forEach { it.remove() } }
+    }
+
+    fun grantExtraTime(child: ChildRef) {
+        scope.launch {
+            val extra = System.currentTimeMillis() + 30 * 60 * 1000
+            val sched = prefs.childSchedule(child.id).copy(allowUntil = extra)
+            prefs.setChildSchedule(child.id, sched)
+            RemoteRepository.pushPolicy(context, child.id, sched)
+            val ap = prefs.childAppPolicy(child.id).copy(bonusUntil = extra)
+            prefs.setChildAppPolicy(child.id, ap)
+            RemoteRepository.pushAppPolicy(context, child.id, ap)
+            RemoteRepository.clearRequest(context, child.id)
+            requests.remove(child.id)
+        }
+    }
+    fun denyRequest(child: ChildRef) {
+        scope.launch { RemoteRepository.clearRequest(context, child.id); requests.remove(child.id) }
     }
 
     Column(
@@ -145,12 +171,18 @@ private fun ParentDashboard(
             )
         }
 
-        // Tamper alerts.
+        val fmt = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
+
+        // Alerts (tamper / SOS / geofence).
         children.forEach { child ->
             alerts[child.id]?.let { (type, at) ->
-                val fmt = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault())
-                val what = if (type == "time_tamper") "possível alteração da hora do sistema"
-                else "evento de segurança"
+                val what = when (type) {
+                    "time_tamper" -> "possível alteração da hora do sistema"
+                    "sos" -> "🆘 SOS — pedido de ajuda!"
+                    "geofence_enter" -> "chegou na área monitorada"
+                    "geofence_exit" -> "saiu da área monitorada"
+                    else -> "evento de segurança"
+                }
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
                         Text(
@@ -158,7 +190,24 @@ private fun ParentDashboard(
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.error,
                         )
-                        Text("Detectado em ${fmt.format(Date(at))}", style = MaterialTheme.typography.bodySmall)
+                        Text("Em ${fmt.format(Date(at))}", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+
+        // Extra-time / unlock requests.
+        children.forEach { child ->
+            requests[child.id]?.let { (_, note, at) ->
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("🙋 ${child.name} pediu: ${note.ifBlank { "mais tempo" }}",
+                            style = MaterialTheme.typography.titleMedium)
+                        Text("Em ${fmt.format(Date(at))}", style = MaterialTheme.typography.bodySmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { grantExtraTime(child) }) { Text("Aprovar +30 min") }
+                            OutlinedButton(onClick = { denyRequest(child) }) { Text("Negar") }
+                        }
                     }
                 }
             }
@@ -401,6 +450,60 @@ private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Uni
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Cancelar bloqueio imediato") }
 
+        ChildTelemetryCard(child)
+
         AppRulesEditor(prefs, child)
+    }
+}
+
+@Composable
+private fun ChildTelemetryCard(child: ChildRef) {
+    val context = LocalContext.current
+    val remoteAvailable = remember { RemoteRepository.available(context) }
+    var location by remember { mutableStateOf<Triple<Double, Double, Long>?>(null) }
+    var usage by remember { mutableStateOf<Pair<String, Long>?>(null) }
+
+    DisposableEffect(child.id, remoteAvailable) {
+        val regs = mutableListOf<ListenerRegistration>()
+        if (remoteAvailable) {
+            RemoteRepository.listenLocation(context, child.id) { lat, lng, at ->
+                location = Triple(lat, lng, at)
+            }?.let { regs.add(it) }
+            RemoteRepository.listenUsage(context, child.id) { json, at ->
+                usage = json to at
+            }?.let { regs.add(it) }
+        }
+        onDispose { regs.forEach { it.remove() } }
+    }
+
+    val fmt = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Localização e uso", style = MaterialTheme.typography.titleMedium)
+
+            val loc = location
+            if (loc == null) {
+                Text("Sem localização recente.", style = MaterialTheme.typography.bodySmall)
+            } else {
+                Text("Última posição: %.5f, %.5f".format(loc.first, loc.second))
+                Text("Em ${fmt.format(Date(loc.third))}", style = MaterialTheme.typography.bodySmall)
+                OutlinedButton(onClick = {
+                    val uri = Uri.parse("geo:${loc.first},${loc.second}?q=${loc.first},${loc.second}(${child.name})")
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+                }) { Text("Abrir no mapa") }
+            }
+
+            val u = usage
+            if (u != null && u.first.isNotBlank()) {
+                Text("Uso hoje (min):", style = MaterialTheme.typography.titleSmall)
+                val map = remember(u.first) {
+                    runCatching { Json.decodeFromString<Map<String, Int>>(u.first) }.getOrDefault(emptyMap())
+                }
+                map.entries.sortedByDescending { it.value }.forEach { (pkg, min) ->
+                    Text("• ${KnownApps.labelFor(pkg)}: $min min", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
     }
 }

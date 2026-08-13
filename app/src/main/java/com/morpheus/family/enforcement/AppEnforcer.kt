@@ -31,9 +31,12 @@ object AppEnforcer {
 
         val budgetExceeded = policy.dailyScreenBudgetMinutes > 0 &&
             UsageTracker.totalTodayMinutes(context) >= policy.dailyScreenBudgetMinutes
+        val homework = policy.homeworkActive(nowMillis)
 
         val blocked = policy.apps.filter { rule ->
-            budgetExceeded ||
+            // Homework/focus mode blocks every managed app (unless it's a study app).
+            (homework && rule.packageName !in policy.studyApps) ||
+                budgetExceeded ||
                 policy.isAppBlockedByWindow(rule.packageName, nowMillis) ||
                 (rule.dailyLimitMinutes > 0 &&
                     UsageTracker.todayMinutes(context, rule.packageName) >= rule.dailyLimitMinutes)

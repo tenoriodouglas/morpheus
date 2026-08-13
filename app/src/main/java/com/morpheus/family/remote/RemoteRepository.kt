@@ -90,6 +90,83 @@ object RemoteRepository {
         }
     }
 
+    // ---- Child -> parent requests (extra time / unlock) -----------------------
+
+    fun reportRequest(context: Context, pairId: String, type: String, note: String, at: Long) {
+        if (!available(context) || pairId.isBlank()) return
+        ensureSignedIn(context)
+        doc(pairId).set(
+            mapOf("reqType" to type, "reqNote" to note, "reqAt" to at),
+            SetOptions.merge(),
+        )
+    }
+
+    /** Parent: clear a handled request so its banner disappears. */
+    fun clearRequest(context: Context, pairId: String) {
+        if (!available(context) || pairId.isBlank()) return
+        ensureSignedIn(context)
+        doc(pairId).set(mapOf("reqAt" to 0L), SetOptions.merge())
+    }
+
+    fun listenRequest(
+        context: Context,
+        pairId: String,
+        onRequest: (type: String, note: String, at: Long) -> Unit,
+    ): ListenerRegistration? {
+        if (!available(context) || pairId.isBlank()) return null
+        ensureSignedIn(context)
+        return doc(pairId).addSnapshotListener { snap, err ->
+            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+            val at = snap.getLong("reqAt") ?: 0L
+            if (at <= 0L) return@addSnapshotListener
+            onRequest(snap.getString("reqType") ?: "extra", snap.getString("reqNote") ?: "", at)
+        }
+    }
+
+    // ---- Child -> parent location & usage -------------------------------------
+
+    fun reportLocation(context: Context, pairId: String, lat: Double, lng: Double, at: Long) {
+        if (!available(context) || pairId.isBlank()) return
+        ensureSignedIn(context)
+        doc(pairId).set(mapOf("lat" to lat, "lng" to lng, "locAt" to at), SetOptions.merge())
+    }
+
+    fun listenLocation(
+        context: Context,
+        pairId: String,
+        onLocation: (lat: Double, lng: Double, at: Long) -> Unit,
+    ): ListenerRegistration? {
+        if (!available(context) || pairId.isBlank()) return null
+        ensureSignedIn(context)
+        return doc(pairId).addSnapshotListener { snap, err ->
+            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+            val at = snap.getLong("locAt") ?: 0L
+            if (at <= 0L) return@addSnapshotListener
+            onLocation(snap.getDouble("lat") ?: 0.0, snap.getDouble("lng") ?: 0.0, at)
+        }
+    }
+
+    fun reportUsage(context: Context, pairId: String, usageJson: String, at: Long) {
+        if (!available(context) || pairId.isBlank()) return
+        ensureSignedIn(context)
+        doc(pairId).set(mapOf("usageJson" to usageJson, "usageAt" to at), SetOptions.merge())
+    }
+
+    fun listenUsage(
+        context: Context,
+        pairId: String,
+        onUsage: (usageJson: String, at: Long) -> Unit,
+    ): ListenerRegistration? {
+        if (!available(context) || pairId.isBlank()) return null
+        ensureSignedIn(context)
+        return doc(pairId).addSnapshotListener { snap, err ->
+            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+            val at = snap.getLong("usageAt") ?: 0L
+            if (at <= 0L) return@addSnapshotListener
+            onUsage(snap.getString("usageJson") ?: "", at)
+        }
+    }
+
     /**
      * Child: subscribe to policy changes. Returns a registration the caller
      * must [ListenerRegistration.remove] when done, or null if unavailable.

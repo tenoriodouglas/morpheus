@@ -35,6 +35,28 @@ fun TimeStepper(label: String, minutes: Int, onChange: (Int) -> Unit) {
     }
 }
 
+/** Generic integer stepper with a unit suffix and a floor. */
+@Composable
+fun ValueStepper(label: String, value: Int, step: Int, suffix: String, min: Int = 0, onChange: (Int) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, modifier = Modifier.padding(end = 8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = { onChange((value - step).coerceAtLeast(min)) }) { Text("−") }
+            Text(
+                "$value$suffix",
+                style = MaterialTheme.typography.titleMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+            OutlinedButton(onClick = { onChange(value + step) }) { Text("+") }
+        }
+    }
+}
+
 /** +/- [step] minute stepper for a duration; 0 renders as "ilimitado". */
 @Composable
 fun MinuteStepper(label: String, minutes: Int, step: Int = 15, onChange: (Int) -> Unit) {

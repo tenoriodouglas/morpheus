@@ -10,6 +10,8 @@ import com.morpheus.family.admin.DeviceRestrictionsManager
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
 import com.morpheus.family.enforcement.AppEnforcer
+import com.morpheus.family.enforcement.UsageTracker
+import com.morpheus.family.location.LocationReporter
 import com.morpheus.family.receiver.ScheduleAlarmReceiver
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.time.TrustedTimeProvider
@@ -34,6 +36,9 @@ object ScheduleEnforcer {
         val t = TrustedTimeProvider.now()
         var blocked = schedule.isBlockedAt(t.millis)
 
+        // Homework/focus mode also blocks internet.
+        if (appPolicy.homeworkActive(t.millis)) blocked = true
+
         // Fail closed: a tampered wall clock means block now and warn the parent.
         if (t.tampered) {
             blocked = true
@@ -56,10 +61,30 @@ object ScheduleEnforcer {
         armNextBoundary(context, schedule, t.millis)
     }
 
-    /** Refresh trusted network time, then enforce. Call when online. */
+    /** Refresh trusted network time, enforce, then upload telemetry. */
     suspend fun syncAndApply(context: Context) {
         runCatching { TrustedTimeProvider.sync() }
         apply(context)
+        runCatching { uploadTelemetry(context) }
+    }
+
+    /** Child -> parent: push current location (+geofence) and a usage summary. */
+    private suspend fun uploadTelemetry(context: Context) {
+        val prefs = Prefs(context)
+        val pairId = prefs.pairedId() ?: return
+        if (pairId.isBlank()) return
+        val appPolicy = prefs.appPolicy()
+        val now = System.currentTimeMillis()
+
+        LocationReporter.reportOnce(context, pairId, appPolicy.geofence, now)
+
+        if (UsageTracker.hasUsageAccess(context)) {
+            val usage = UsageTracker.topAppsToday(context)
+            if (usage.isNotEmpty()) {
+                val json = usage.joinToString(",", "{", "}") { (pkg, min) -> "\"$pkg\":$min" }
+                RemoteRepository.reportUsage(context, pairId, json, now)
+            }
+        }
     }
 
     /** True once the child has approved the VPN (or Device Owner pre-granted it). */

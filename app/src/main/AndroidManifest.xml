@@ -26,6 +26,12 @@
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
 
+    <!-- Location (child location for the parent, geofence, SOS). Disclosed to
+         the child (managed-device notice) and in the privacy policy. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
     <application
         android:name=".MorpheusApp"
         android:allowBackup="false"

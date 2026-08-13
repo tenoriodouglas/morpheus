@@ -51,6 +51,19 @@ class ScheduleTest {
     }
 
     @Test
+    fun allowUntil_grantsExtraTimeButManualBlockWins() {
+        val night = listOf(BlockWindow(22 * 60, 6 * 60 + 30))
+        val now = at(2026, Calendar.AUGUST, 13, 23, 0) // normally blocked
+        // allowUntil suspends the block...
+        val allowed = Schedule(windows = night, allowUntil = now + 60_000)
+        assertFalse(allowed.isBlockedAt(now))
+        assertTrue(allowed.isBlockedAt(now + 120_000)) // extra time expired
+        // ...unless an explicit manual block is active (it wins).
+        val blocked = allowed.copy(manualBlockUntil = now + 60_000)
+        assertTrue(blocked.isBlockedAt(now))
+    }
+
+    @Test
     fun children_roundTripAndUpsertSemantics() {
         val list = listOf(
             ChildRef("ABC123", "João"),

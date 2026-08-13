@@ -74,6 +74,20 @@ fun AppRulesEditor(prefs: Prefs, child: ChildRef) {
             )
         }
 
+        // Homework / focus mode.
+        val homeworkOn = p.homeworkUntil > System.currentTimeMillis()
+        if (homeworkOn) {
+            OutlinedButton(
+                onClick = { persist(p.copy(homeworkUntil = 0L)) },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Encerrar modo dever de casa") }
+        } else {
+            Button(
+                onClick = { persist(p.copy(homeworkUntil = System.currentTimeMillis() + 60 * 60 * 1000)) },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Modo dever de casa por 1 hora") }
+        }
+
         Text("Restrições (requer Device Owner)", style = MaterialTheme.typography.titleMedium)
         RestrictionSwitch("Bloquear instalar novos apps", p.restrictions.blockAppInstall) {
             persist(p.copy(restrictions = p.restrictions.copy(blockAppInstall = it)))
@@ -83,6 +97,61 @@ fun AppRulesEditor(prefs: Prefs, child: ChildRef) {
         }
         RestrictionSwitch("Exigir hora automática", p.restrictions.requireAutoTime) {
             persist(p.copy(restrictions = p.restrictions.copy(requireAutoTime = it)))
+        }
+        RestrictionSwitch("Filtro de conteúdo adulto (DNS)", p.restrictions.safeDnsHost.isNotBlank()) { on ->
+            persist(p.copy(restrictions = p.restrictions.copy(
+                safeDnsHost = if (on) FAMILY_DNS_HOST else "",
+            )))
+        }
+
+        GeofenceEditor(p.geofence) { persist(p.copy(geofence = it)) }
+    }
+}
+
+private const val FAMILY_DNS_HOST = "family.cloudflare-dns.com"
+
+@Composable
+private fun GeofenceEditor(geofence: com.morpheus.family.data.Geofence, onChange: (com.morpheus.family.data.Geofence) -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Área monitorada (geofence)", style = MaterialTheme.typography.titleMedium)
+                Switch(checked = geofence.enabled, onCheckedChange = { onChange(geofence.copy(enabled = it)) })
+            }
+            if (geofence.enabled) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = geofence.name,
+                    onValueChange = { onChange(geofence.copy(name = it)) },
+                    label = { Text("Nome (ex.: Casa)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = if (geofence.lat == 0.0) "" else geofence.lat.toString(),
+                    onValueChange = { onChange(geofence.copy(lat = it.toDoubleOrNull() ?: 0.0)) },
+                    label = { Text("Latitude") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = if (geofence.lng == 0.0) "" else geofence.lng.toString(),
+                    onValueChange = { onChange(geofence.copy(lng = it.toDoubleOrNull() ?: 0.0)) },
+                    label = { Text("Longitude") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                ValueStepper("Raio", geofence.radiusMeters, step = 50, suffix = " m", min = 50) {
+                    onChange(geofence.copy(radiusMeters = it))
+                }
+                Text(
+                    "Você recebe um alerta quando o filho entra/sai desta área.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
     }
 }
