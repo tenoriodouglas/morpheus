@@ -189,6 +189,8 @@ fun ChildScreen(prefs: Prefs) {
             }
         }
 
+        TransparencyCard()
+
         RemoveProtectionCard(onClick = { showRemove = true })
     }
 
@@ -201,6 +203,34 @@ fun ChildScreen(prefs: Prefs) {
                 showRemove = false
             },
         )
+    }
+}
+
+/**
+ * Tells the child, in plain language, exactly what the guardian can see. The
+ * whole point of the app is transparent supervision, so this is not optional.
+ */
+@Composable
+private fun TransparencyCard() {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("👀 O que o responsável vê", style = MaterialTheme.typography.titleSmall)
+            Text("• Quanto tempo você usa o celular por dia", style = MaterialTheme.typography.bodySmall)
+            Text("• Quais apps você mais usa e qual está aberto agora", style = MaterialTheme.typography.bodySmall)
+            Text("• Se a tela está ligada e quais apps estão bloqueados", style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Ele NÃO vê suas mensagens, fotos, senhas ou o que aparece na tela. " +
+                    "O Morpheus nunca liga o microfone nem a câmera.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
     }
 }
 

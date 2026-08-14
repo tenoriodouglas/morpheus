@@ -202,6 +202,31 @@ object RemoteRepository {
         }
     }
 
+    // ---- Child -> parent live status (screen time, current app, blocks) -------
+
+    /** Child: publish the periodic transparency snapshot for the parent's dashboard. */
+    fun reportStatus(context: Context, pairId: String, statusJson: String, at: Long) {
+        if (!available(context) || pairId.isBlank()) return
+        ensureSignedIn(context)
+        doc(pairId).set(mapOf("statusJson" to statusJson, "statusAt" to at), SetOptions.merge())
+    }
+
+    /** Parent: observe the child's live status snapshot. */
+    fun listenStatus(
+        context: Context,
+        pairId: String,
+        onStatus: (statusJson: String, at: Long) -> Unit,
+    ): ListenerRegistration? {
+        if (!available(context) || pairId.isBlank()) return null
+        ensureSignedIn(context)
+        return doc(pairId).addSnapshotListener { snap, err ->
+            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+            val at = snap.getLong("statusAt") ?: 0L
+            if (at <= 0L) return@addSnapshotListener
+            onStatus(snap.getString("statusJson") ?: "", at)
+        }
+    }
+
     /**
      * Child: subscribe to policy changes. Returns a registration the caller
      * must [ListenerRegistration.remove] when done, or null if unavailable.

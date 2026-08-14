@@ -16,6 +16,8 @@ import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.schedule.ScheduleEnforcer
 import com.morpheus.family.ui.MainActivity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -32,6 +34,20 @@ class GuardianService : LifecycleService() {
         super.onCreate()
         startForeground(NOTIF_ID, buildNotification())
         startRemoteSync()
+        startStatusTicker()
+    }
+
+    /**
+     * Publish the transparency snapshot once a minute so the parent dashboard
+     * shows live screen time and the current app. Stops with the service.
+     */
+    private fun startStatusTicker() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                runCatching { ScheduleEnforcer.uploadStatus(applicationContext) }
+                delay(STATUS_INTERVAL_MS)
+            }
+        }
     }
 
     /** Subscribe to the parent's live policy updates (no-op without Firebase). */
@@ -97,6 +113,7 @@ class GuardianService : LifecycleService() {
 
     companion object {
         private const val NOTIF_ID = 4200
+        private const val STATUS_INTERVAL_MS = 60_000L
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, GuardianService::class.java))

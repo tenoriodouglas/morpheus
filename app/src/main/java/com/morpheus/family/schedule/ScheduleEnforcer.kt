@@ -7,6 +7,10 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Build
 import com.morpheus.family.admin.DeviceRestrictionsManager
+import com.morpheus.family.data.AppPolicy
+import com.morpheus.family.data.AppUsage
+import com.morpheus.family.data.BlockedApp
+import com.morpheus.family.data.ChildStatus
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
 import com.morpheus.family.enforcement.AppEnforcer
@@ -88,6 +92,74 @@ object ScheduleEnforcer {
                 val json = usage.joinToString(",", "{", "}") { (pkg, min) -> "\"$pkg\":$min" }
                 RemoteRepository.reportUsage(context, pairId, json, now)
             }
+        }
+
+        uploadStatus(context)
+    }
+
+    /**
+     * Child -> parent: the live transparency snapshot (screen time, foreground
+     * app, blocked apps). Called every minute by the guardian service so the
+     * parent's dashboard reflects "now". Cheap and best-effort.
+     */
+    suspend fun uploadStatus(context: Context) {
+        val prefs = Prefs(context)
+        val pairId = prefs.pairedId() ?: return
+        if (pairId.isBlank()) return
+
+        val schedule = prefs.schedule()
+        val appPolicy = prefs.appPolicy()
+        val t = TrustedTimeProvider.now(context)
+        val now = System.currentTimeMillis()
+
+        val hasUsage = UsageTracker.hasUsageAccess(context)
+        val current = if (hasUsage) UsageTracker.currentForegroundApp(context) else null
+        val top = if (hasUsage) UsageTracker.topAppsToday(context, 10) else emptyList()
+
+        val status = ChildStatus(
+            at = now,
+            screenOn = UsageTracker.isScreenOn(context),
+            currentApp = current?.first.orEmpty(),
+            currentAppLabel = current?.first?.let { UsageTracker.labelFor(context, it) }.orEmpty(),
+            currentAppSince = current?.second ?: 0L,
+            totalMinutesToday = if (hasUsage) UsageTracker.totalTodayMinutes(context) else 0,
+            topApps = top.map { (pkg, min) -> AppUsage(pkg, UsageTracker.labelFor(context, pkg), min) },
+            blockedApps = blockedAppsNow(context, appPolicy, t.millis),
+            internetBlocked = schedule.isBlockedAt(t.millis) ||
+                appPolicy.homeworkActive(t.millis) || t.tampered,
+            homeworkActive = appPolicy.homeworkActive(t.millis),
+            budgetMinutes = appPolicy.dailyScreenBudgetMinutes,
+            usageAccessGranted = hasUsage,
+        )
+        RemoteRepository.reportHeartbeat(context, pairId, now)
+        RemoteRepository.reportStatus(context, pairId, ChildStatus.encode(status), now)
+    }
+
+    /** Which managed apps are blocked right now, and why — mirrors [AppEnforcer.apply]. */
+    private fun blockedAppsNow(
+        context: Context,
+        policy: AppPolicy,
+        nowMillis: Long,
+    ): List<BlockedApp> {
+        if (policy.apps.isEmpty()) return emptyList()
+        val budgetExceeded = policy.dailyScreenBudgetMinutes > 0 &&
+            UsageTracker.totalTodayMinutes(context) >= policy.dailyScreenBudgetMinutes
+        val homework = policy.homeworkActive(nowMillis)
+
+        return policy.apps.mapNotNull { rule ->
+            val reason = when {
+                homework && rule.packageName !in policy.studyApps -> "homework"
+                budgetExceeded -> "budget"
+                policy.isAppBlockedByWindow(rule.packageName, nowMillis) -> "schedule"
+                rule.dailyLimitMinutes > 0 &&
+                    UsageTracker.todayMinutes(context, rule.packageName) >= rule.dailyLimitMinutes -> "limit"
+                else -> null
+            } ?: return@mapNotNull null
+            BlockedApp(
+                pkg = rule.packageName,
+                label = rule.label.ifBlank { UsageTracker.labelFor(context, rule.packageName) },
+                reason = reason,
+            )
         }
     }
 

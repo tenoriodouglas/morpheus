@@ -13,6 +13,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -21,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -32,22 +34,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import com.google.firebase.firestore.ListenerRegistration
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.morpheus.family.data.BlockWindow
 import com.morpheus.family.data.ChildRef
+import com.morpheus.family.data.ChildStatus
 import com.morpheus.family.data.KnownApps
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.util.Pin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.json.Json
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -430,10 +430,17 @@ private fun ChildCard(
     val s = schedule ?: Schedule()
 
     var lastSeen by remember { mutableStateOf(0L) }
+    var status by remember { mutableStateOf(ChildStatus()) }
     DisposableEffect(child.id, remoteAvailable) {
-        val reg = if (remoteAvailable)
-            RemoteRepository.listenHeartbeat(context, child.id) { lastSeen = it } else null
-        onDispose { reg?.remove() }
+        val regs = mutableListOf<ListenerRegistration>()
+        if (remoteAvailable) {
+            RemoteRepository.listenHeartbeat(context, child.id) { lastSeen = it }
+                ?.let { regs.add(it) }
+            RemoteRepository.listenStatus(context, child.id) { json, _ ->
+                status = ChildStatus.decode(json)
+            }?.let { regs.add(it) }
+        }
+        onDispose { regs.forEach { it.remove() } }
     }
 
     Card(Modifier.fillMaxWidth()) {
@@ -441,6 +448,21 @@ private fun ChildCard(
             Text(child.name, style = MaterialTheme.typography.titleLarge)
             Text("Código: ${child.id}", style = MaterialTheme.typography.bodySmall)
             Text(connectionStatus(lastSeen), style = MaterialTheme.typography.bodySmall)
+
+            // Live one-liner: what the child is doing right now.
+            val now = System.currentTimeMillis()
+            if (!status.isStale(now)) {
+                Text(
+                    when {
+                        status.usingNow(now) ->
+                            "📱 Usando ${status.currentAppLabel.ifBlank { status.currentApp }}"
+                        status.screenOn -> "📱 Tela ligada"
+                        else -> "😴 Em repouso"
+                    } + " · ${formatMinutes(status.totalMinutesToday)} hoje",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             Text(
                 if (!s.enabled) "Bloqueio desligado"
                 else "Janelas: " + s.windows.joinToString(", ") { it.label() },
@@ -526,58 +548,175 @@ private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Uni
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Cancelar bloqueio imediato") }
 
-        ChildTelemetryCard(child)
+        ChildMonitorCard(child)
 
         AppRulesEditor(prefs, child)
     }
 }
 
+/** Formats minutes as "2 h 15 min" / "45 min". */
+private fun formatMinutes(min: Int): String = when {
+    min <= 0 -> "0 min"
+    min < 60 -> "$min min"
+    min % 60 == 0 -> "${min / 60} h"
+    else -> "${min / 60} h ${min % 60} min"
+}
+
+private fun reasonLabel(reason: String): String = when (reason) {
+    "homework" -> "modo tarefa"
+    "budget" -> "limite do dia"
+    "limit" -> "limite do app"
+    else -> "horário"
+}
+
+/**
+ * Live monitoring panel: what the child is doing right now, today's screen time,
+ * the app ranking and which apps are currently blocked.
+ */
 @Composable
-private fun ChildTelemetryCard(child: ChildRef) {
+private fun ChildMonitorCard(child: ChildRef) {
     val context = LocalContext.current
     val remoteAvailable = remember { RemoteRepository.available(context) }
-    var location by remember { mutableStateOf<Triple<Double, Double, Long>?>(null) }
-    var usage by remember { mutableStateOf<Pair<String, Long>?>(null) }
+    var status by remember { mutableStateOf(ChildStatus()) }
 
     DisposableEffect(child.id, remoteAvailable) {
-        val regs = mutableListOf<ListenerRegistration>()
-        if (remoteAvailable) {
-            RemoteRepository.listenLocation(context, child.id) { lat, lng, at ->
-                location = Triple(lat, lng, at)
-            }?.let { regs.add(it) }
-            RemoteRepository.listenUsage(context, child.id) { json, at ->
-                usage = json to at
-            }?.let { regs.add(it) }
-        }
-        onDispose { regs.forEach { it.remove() } }
+        val reg = if (remoteAvailable) {
+            RemoteRepository.listenStatus(context, child.id) { json, _ ->
+                status = ChildStatus.decode(json)
+            }
+        } else null
+        onDispose { reg?.remove() }
     }
 
-    val fmt = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
+    // Re-render each 30s so "há X min" and the live/stale badge stay honest.
+    var tick by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(child.id) {
+        while (true) {
+            delay(30_000)
+            tick = System.currentTimeMillis()
+        }
+    }
+    val now = tick
 
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Localização e uso", style = MaterialTheme.typography.titleMedium)
-
-            val loc = location
-            if (loc == null) {
-                Text("Sem localização recente.", style = MaterialTheme.typography.bodySmall)
-            } else {
-                Text("Última posição: %.5f, %.5f".format(loc.first, loc.second))
-                Text("Em ${fmt.format(Date(loc.third))}", style = MaterialTheme.typography.bodySmall)
-                OutlinedButton(onClick = {
-                    val uri = Uri.parse("geo:${loc.first},${loc.second}?q=${loc.first},${loc.second}(${child.name})")
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-                }) { Text("Abrir no mapa") }
-            }
-
-            val u = usage
-            if (u != null && u.first.isNotBlank()) {
-                Text("Uso hoje (min):", style = MaterialTheme.typography.titleSmall)
-                val map = remember(u.first) {
-                    runCatching { Json.decodeFromString<Map<String, Int>>(u.first) }.getOrDefault(emptyMap())
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        // ---- Right now -------------------------------------------------------
+        val using = status.usingNow(now)
+        Card(
+            Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = if (using) MaterialTheme.colorScheme.secondaryContainer
+                else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = if (using) MaterialTheme.colorScheme.onSecondaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+        ) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Agora", style = MaterialTheme.typography.titleMedium)
+                when {
+                    status.isStale(now) -> Text(
+                        "Sem dados recentes — o celular pode estar sem internet ou desligado.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    using -> {
+                        Text(
+                            "📱 Usando: ${status.currentAppLabel.ifBlank { status.currentApp }}",
+                            style = MaterialTheme.typography.titleLarge,
+                        )
+                        if (status.currentAppSince > 0) {
+                            val mins = ((now - status.currentAppSince) / 60000L).toInt().coerceAtLeast(0)
+                            Text("Há ${formatMinutes(mins)} neste app", style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                    status.screenOn -> Text("📱 Tela ligada", style = MaterialTheme.typography.titleLarge)
+                    else -> Text("😴 Celular em repouso", style = MaterialTheme.typography.titleLarge)
                 }
-                map.entries.sortedByDescending { it.value }.forEach { (pkg, min) ->
-                    Text("• ${KnownApps.labelFor(pkg)}: $min min", style = MaterialTheme.typography.bodySmall)
+                if (status.internetBlocked) {
+                    Text("🚫 Internet bloqueada agora", style = MaterialTheme.typography.bodyMedium)
+                }
+                if (status.homeworkActive) {
+                    Text("📚 Modo tarefa ativo", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+
+        // ---- Screen time today ----------------------------------------------
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Tempo de tela hoje", style = MaterialTheme.typography.titleMedium)
+                if (!status.usageAccessGranted) {
+                    Text(
+                        "O acesso de uso não foi liberado no celular do filho. " +
+                            "Peça para ativar em “Contador de tempo”, nos extras do app.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        formatMinutes(status.totalMinutesToday),
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
+                    if (status.budgetMinutes > 0) {
+                        val frac = (status.totalMinutesToday.toFloat() / status.budgetMinutes)
+                            .coerceIn(0f, 1f)
+                        LinearProgressIndicator(
+                            progress = { frac },
+                            modifier = Modifier.fillMaxWidth().height(8.dp),
+                        )
+                        Text(
+                            "de ${formatMinutes(status.budgetMinutes)} permitidos",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+
+        // ---- Top apps --------------------------------------------------------
+        if (status.topApps.isNotEmpty()) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Apps mais usados hoje", style = MaterialTheme.typography.titleMedium)
+                    val max = status.topApps.maxOf { it.minutes }.coerceAtLeast(1)
+                    status.topApps.forEach { app ->
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    app.label.ifBlank { KnownApps.labelFor(app.pkg) },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                Text(formatMinutes(app.minutes), style = MaterialTheme.typography.bodyMedium)
+                            }
+                            LinearProgressIndicator(
+                                progress = { app.minutes.toFloat() / max },
+                                modifier = Modifier.fillMaxWidth().height(6.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---- Blocked right now ----------------------------------------------
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Apps bloqueados agora", style = MaterialTheme.typography.titleMedium)
+                if (status.blockedApps.isEmpty()) {
+                    Text(
+                        "Nenhum app bloqueado neste momento.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    status.blockedApps.forEach { app ->
+                        Text(
+                            "🚫 ${app.label.ifBlank { KnownApps.labelFor(app.pkg) }} — ${reasonLabel(app.reason)}",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                 }
             }
         }
