@@ -294,7 +294,10 @@ private fun ParentDashboard(
                                 .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                                 .setPrompt("Aponte para o QR no celular do filho")
                                 .setBeepEnabled(false)
-                                .setOrientationLocked(false),
+                                // Portrait-only capture activity; keep the
+                                // library from re-applying sensor orientation.
+                                .setCaptureActivity(PortraitCaptureActivity::class.java)
+                                .setOrientationLocked(true),
                         )
                     },
                     modifier = Modifier.fillMaxWidth(),
