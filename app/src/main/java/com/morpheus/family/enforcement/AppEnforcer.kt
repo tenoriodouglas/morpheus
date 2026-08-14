@@ -8,16 +8,15 @@ import com.morpheus.family.data.AppPolicy
 /**
  * Decides which managed apps must be blocked right now and enforces it.
  *
- * Two enforcement paths:
+ * Enforcement path:
  *  - **Device Owner** (strong): suspends/unsuspends packages precisely via
  *    [DevicePolicyManager.setPackagesSuspended] — the app can't even be opened.
- *  - **Fallback** (no owner): [blockedNow] is published for
- *    [com.morpheus.family.service.AppBlockAccessibilityService], which covers a
- *    blocked app with a full-screen notice when it comes to the foreground.
+ *
+ * [blockedNow] is also exposed for any future foreground-based fallback blocker.
  */
 object AppEnforcer {
 
-    /** Packages that should be blocked at the last [apply]; read by the a11y service. */
+    /** Packages that should be blocked at the last [apply]. */
     @Volatile
     var blockedNow: Set<String> = emptySet()
         private set

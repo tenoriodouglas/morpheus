@@ -26,11 +26,9 @@
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
 
-    <!-- Location (child location for the parent, geofence, SOS). Disclosed to
-         the child (managed-device notice) and in the privacy policy. -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- Location is temporarily disabled for the first Play release to avoid the
+         background-location review (video + prominent disclosure). It will be
+         re-added in a later update with the proper in-app disclosure flow. -->
 
     <!-- QR pairing scan (parent). -->
     <uses-permission android:name="android.permission.CAMERA" />
@@ -64,18 +62,10 @@
             android:noHistory="true"
             android:theme="@style/Theme.Morpheus" />
 
-        <!-- Fallback app blocker for non-Device-Owner installs. -->
-        <service
-            android:name=".service.AppBlockAccessibilityService"
-            android:exported="false"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/app_block_accessibility_config" />
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-        </service>
+        <!-- Note: the accessibility-based app blocker was removed for the first
+             Play release (its policy requires a demo video + prominent disclosure).
+             Internet blocking (VPN) and anti-uninstall (Device Admin) are unaffected;
+             per-app blocking still works on Device Owner installs. -->
 
         <!-- Device Owner provisioning (scanned as a QR during setup wizard). -->
         <activity

@@ -165,26 +165,41 @@ private fun ParentDashboard(
         modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text("Painel da família", style = MaterialTheme.typography.headlineSmall)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("🛡️", style = MaterialTheme.typography.headlineSmall)
+            Column {
+                Text("Painel da família", style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    if (children.isEmpty()) "Conecte o primeiro filho abaixo"
+                    else "${children.size} " + if (children.size == 1) "filho protegido" else "filhos protegidos",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
 
         if (!remoteAvailable) {
             Card(
                 Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                 ),
             ) {
                 Row(
-                    Modifier.padding(14.dp),
+                    Modifier.padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Text("💡", style = MaterialTheme.typography.titleMedium)
+                    Text("📶", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "Controle remoto ainda não ativado. As regras funcionam localmente; " +
-                            "ative o Firebase para controlar os filhos à distância (veja o README).",
-                        style = MaterialTheme.typography.bodySmall,
+                        "As regras já funcionam no aparelho do filho. O controle à distância " +
+                            "(ver localização, aprovar mais tempo, bloquear na hora) será ativado " +
+                            "em breve numa próxima atualização.",
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
             }

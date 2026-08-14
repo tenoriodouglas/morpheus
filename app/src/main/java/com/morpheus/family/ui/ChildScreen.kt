@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -51,14 +52,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.morpheus.family.admin.MorpheusDeviceAdminReceiver
-import com.morpheus.family.data.Geofence
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.enforcement.UsageTracker
-import com.morpheus.family.location.LocationReporter
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.service.GuardianService
 import kotlinx.coroutines.launch
 import java.util.UUID
+
+/** The friendly Morpheus mascot — a sleepy little owl that "guards the night". */
+private const val MASCOT = "🦉"
 
 private data class SetupStep(
     val emoji: String,
@@ -70,9 +72,9 @@ private data class SetupStep(
 )
 
 /**
- * Child device: friendly step-by-step setup wizard (one action at a time),
- * pairing QR, and a transparent "protected" status. Nothing here is hidden —
- * that transparency is deliberate.
+ * Child device: a warm, playful screen. During setup it's a friendly one-step-at-a-time
+ * wizard; once ready it becomes a cheerful "you're protected" home with the pairing code,
+ * the rest schedule and the help buttons. Nothing here is hidden — that's deliberate.
  */
 @Composable
 fun ChildScreen(prefs: Prefs) {
@@ -93,9 +95,6 @@ fun ChildScreen(prefs: Prefs) {
 
     val notifLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
-    ) { refresh++ }
-    val locationLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
     ) { refresh++ }
     val vpnLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
@@ -121,37 +120,24 @@ fun ChildScreen(prefs: Prefs) {
     }
     val vpnReady = remember(refresh) { VpnService.prepare(context) == null }
     val adminReady = remember(refresh) { isAdminActive(context) }
-    val a11yReady = remember(refresh) { isAccessibilityEnabled(context) }
     val usageReady = remember(refresh) { UsageTracker.hasUsageAccess(context) }
-    val locReady = remember(refresh) { LocationReporter.hasPermission(context) }
 
     val steps = buildList {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            add(SetupStep("🔔", "Notificações", "Mostrar o aviso de que este aparelho é gerenciado.", notifReady, true) {
+            add(SetupStep("🔔", "Ligar os avisos", "Para mostrar quando é hora de descansar.", notifReady, true) {
                 notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             })
         }
-        add(SetupStep("🌐", "Bloqueio de internet", "Permite cortar a internet nos horários definidos pelo responsável.", vpnReady, true) {
+        add(SetupStep("🌐", "Cuidar da internet", "Deixa o responsável combinar os horários da internet.", vpnReady, true) {
             VpnService.prepare(context)?.let { vpnLauncher.launch(it) } ?: run { refresh++ }
         })
-        add(SetupStep("🛡️", "Proteção contra remoção", "Impede que o app seja desinstalado facilmente.", adminReady, true) {
+        add(SetupStep("🛡️", "Escudo protetor", "Mantém o Morpheus seguro no celular.", adminReady, true) {
             adminLauncher.launch(adminIntent(context))
         })
-        add(SetupStep("📵", "Bloqueio de apps", "Bloquear apps específicos em certos horários.", a11yReady, false) {
-            runCatching { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-        })
-        add(SetupStep("⏱️", "Limites por app", "Contar o tempo de uso de cada app.", usageReady, false) {
+        add(SetupStep("⏱️", "Contador de tempo", "Mostra quanto tempo cada app foi usado.", usageReady, false) {
             runCatching { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
         })
-        add(SetupStep("📍", "Localização e SOS", "Mostrar a localização ao responsável e ativar o SOS.", locReady, false) {
-            locationLauncher.launch(
-                arrayOf(
-                    android.Manifest.permission.ACCESS_FINE_LOCATION,
-                    android.Manifest.permission.ACCESS_COARSE_LOCATION,
-                ),
-            )
-        })
-        add(SetupStep("🔋", "Bateria", "Manter a proteção sempre ativa em segundo plano.", null, false) {
+        add(SetupStep("🔋", "Sempre desperto", "Mantém o escudo ligado o tempo todo.", null, false) {
             runCatching { context.startActivity(batteryIntent()) }
         })
     }
@@ -164,42 +150,87 @@ fun ChildScreen(prefs: Prefs) {
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
             .padding(horizontal = 20.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Celular do filho", style = MaterialTheme.typography.headlineSmall)
-
-        PairingCard(pairId)
+        MascotHeader(protected = allRequiredDone)
 
         if (!allRequiredDone && currentStep != null) {
             WizardCard(currentStep, requiredDone, required.size)
+            PairingCard(pairId)
         } else {
-            SuccessBanner()
+            HappyProtectedCard()
+            ScheduleCard(schedule?.let { it.enabled to it.windows.map { w -> w.label() } })
+            val id = pairId
+            if (!id.isNullOrBlank()) HelpCard(
+                onExtra = {
+                    scope.launch {
+                        RemoteRepository.reportRequest(
+                            context, id, "extra", "Pediu mais tempo", System.currentTimeMillis(),
+                        )
+                    }
+                },
+                onSos = {
+                    scope.launch {
+                        RemoteRepository.reportAlert(context, id, "sos", System.currentTimeMillis())
+                    }
+                },
+            )
+            PairingCard(pairId)
+            if (optional.any { it.done != true }) {
+                Text("Extras (se quiser) ✨", style = MaterialTheme.typography.titleMedium)
+                optional.forEach { OptionalRow(it) }
+            }
         }
+    }
+}
 
-        if (allRequiredDone && optional.any { it.done != true }) {
-            Text("Deixe ainda melhor (opcional)", style = MaterialTheme.typography.titleMedium)
-            optional.forEach { OptionalRow(it) }
+@Composable
+private fun MascotHeader(protected: Boolean) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            modifier = Modifier.size(64.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) { Text(MASCOT, fontSize = 34.sp) }
         }
+        Column {
+            Text("Oi! Eu sou o Morpheus", style = MaterialTheme.typography.titleLarge)
+            Text(
+                if (protected) "Estou de olho por você 💜" else "Vamos preparar seu celular?",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
 
-        ScheduleCard(schedule?.let { it.enabled to it.windows.map { w -> w.label() } })
-
-        val id = pairId
-        if (!id.isNullOrBlank()) HelpCard(
-            onExtra = {
-                scope.launch {
-                    RemoteRepository.reportRequest(context, id, "extra", "Pediu mais tempo", System.currentTimeMillis())
-                }
-            },
-            onSos = {
-                scope.launch {
-                    val now = System.currentTimeMillis()
-                    RemoteRepository.reportAlert(context, id, "sos", now)
-                    LocationReporter.reportOnce(context, id, Geofence(), now)
-                }
-            },
-        )
-
-        ProtectionLevelsCard()
+@Composable
+private fun HappyProtectedCard() {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        ),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text("🎉", fontSize = 48.sp)
+            Text("Tudo certinho!", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+            Text(
+                "Seu celular está protegido pelo Morpheus.",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -217,15 +248,15 @@ private fun PairingCard(pairId: String?) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Conectar ao responsável", style = MaterialTheme.typography.titleMedium)
+            Text("🔗 Conectar com o responsável", style = MaterialTheme.typography.titleMedium)
             Surface(color = androidx.compose.ui.graphics.Color.White, shape = MaterialTheme.shapes.medium) {
                 Box(Modifier.padding(12.dp)) {
                     pairId?.let { QrCode(QR_PREFIX + it, modifier = Modifier.size(180.dp)) }
                 }
             }
-            Text(pairId ?: "…", style = MaterialTheme.typography.headlineMedium)
+            Text(pairId ?: "…", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text(
-                "Escaneie este QR no celular do responsável — ou informe o código acima.",
+                "O responsável escaneia este QR — ou digita o código acima.",
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center,
             )
@@ -237,55 +268,32 @@ private fun PairingCard(pairId: String?) {
 private fun WizardCard(step: SetupStep, doneCount: Int, total: Int) {
     Card(Modifier.fillMaxWidth()) {
         Column(
-            Modifier.fillMaxWidth().padding(20.dp),
+            Modifier.fillMaxWidth().padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                "Configuração — passo ${doneCount + 1} de $total",
+                "Passo ${doneCount + 1} de $total",
                 style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.primary,
             )
             LinearProgressIndicator(
                 progress = { doneCount.toFloat() / total },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().height(8.dp),
             )
             Spacer(Modifier.height(4.dp))
-            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.size(72.dp)) {
-                Box(contentAlignment = Alignment.Center) { Text(step.emoji, fontSize = 34.sp) }
+            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.size(84.dp)) {
+                Box(contentAlignment = Alignment.Center) { Text(step.emoji, fontSize = 40.sp) }
             }
             Text(step.title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
             Text(
                 step.desc,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Button(onClick = step.onClick, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                Text("Ativar agora")
-            }
-        }
-    }
-}
-
-@Composable
-private fun SuccessBanner() {
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        ),
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(20.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text("✅", fontSize = 30.sp)
-            Column {
-                Text("Tudo pronto!", style = MaterialTheme.typography.titleLarge)
-                Text("Este aparelho está protegido e gerenciado.", style = MaterialTheme.typography.bodyMedium)
+            Button(onClick = step.onClick, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                Text("Vamos lá!", style = MaterialTheme.typography.titleMedium)
             }
         }
     }
@@ -299,7 +307,7 @@ private fun OptionalRow(step: SetupStep) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(step.emoji, fontSize = 24.sp)
+            Text(step.emoji, fontSize = 26.sp)
             Column(Modifier.weight(1f)) {
                 Text(step.title, style = MaterialTheme.typography.titleSmall)
                 Text(
@@ -309,9 +317,9 @@ private fun OptionalRow(step: SetupStep) {
                 )
             }
             if (step.done == true) {
-                Text("✓", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.secondary)
+                Text("✓", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.secondary)
             } else {
-                TextButton(onClick = step.onClick) { Text("Ativar") }
+                TextButton(onClick = step.onClick) { Text("Ligar") }
             }
         }
     }
@@ -319,16 +327,22 @@ private fun OptionalRow(step: SetupStep) {
 
 @Composable
 private fun ScheduleCard(state: Pair<Boolean, List<String>>?) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Horários bloqueados", style = MaterialTheme.typography.titleMedium)
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ),
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("😴 Sua hora de descanso", style = MaterialTheme.typography.titleMedium)
             if (state == null || !state.first) {
-                Text("Nenhum bloqueio ativo no momento.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Nenhum horário de descanso agora. Aproveite! 🎈", color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 state.second.forEach { Text("• $it") }
             }
             Text(
-                "Definidos pelo responsável. Este aparelho é gerenciado pelo Morpheus.",
+                "Combinado com o seu responsável.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -339,43 +353,20 @@ private fun ScheduleCard(state: Pair<Boolean, List<String>>?) {
 @Composable
 private fun HelpCard(onExtra: () -> Unit, onSos: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Precisa de algo?", style = MaterialTheme.typography.titleMedium)
-            Button(onClick = onExtra, modifier = Modifier.fillMaxWidth()) {
-                Text("Pedir mais tempo ao responsável")
-            }
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Precisa de ajuda?", style = MaterialTheme.typography.titleMedium)
+            Button(
+                onClick = onExtra,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+            ) { Text("⏰  Pedir mais um tempinho") }
             Button(
                 onClick = onSos,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().height(52.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.tertiary,
                     contentColor = MaterialTheme.colorScheme.onTertiary,
                 ),
-            ) { Text("🆘  Enviar SOS") }
-        }
-    }
-}
-
-@Composable
-private fun ProtectionLevelsCard() {
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        ),
-    ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Proteção contra remoção", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "• Padrão: pode ser desativado nas Configurações, mas o responsável é avisado na hora.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                "• Máximo (Device Owner): impossível de desinstalar. Configurado ao resetar o aparelho e " +
-                    "escanear o QR de provisionamento — sem precisar de computador.",
-                style = MaterialTheme.typography.bodySmall,
-            )
+            ) { Text("🆘  Preciso de ajuda agora") }
         }
     }
 }
@@ -383,15 +374,6 @@ private fun ProtectionLevelsCard() {
 private fun isAdminActive(context: Context): Boolean {
     val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
     return dpm.isAdminActive(MorpheusDeviceAdminReceiver.component(context))
-}
-
-/** Whether our AppBlockAccessibilityService is enabled in system settings. */
-private fun isAccessibilityEnabled(context: Context): Boolean {
-    val flat = Settings.Secure.getString(
-        context.contentResolver,
-        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-    ) ?: return false
-    return flat.split(':').any { it.contains(context.packageName, ignoreCase = true) }
 }
 
 private fun adminIntent(context: Context): Intent =
