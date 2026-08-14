@@ -22,12 +22,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -37,6 +39,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -52,10 +55,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.morpheus.family.admin.MorpheusDeviceAdminReceiver
+import com.morpheus.family.admin.ProtectionManager
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.enforcement.UsageTracker
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.service.GuardianService
+import com.morpheus.family.util.Pin
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -84,6 +89,8 @@ fun ChildScreen(prefs: Prefs) {
 
     val pairId by prefs.pairedIdFlow.collectAsState(initial = null)
     val schedule by prefs.scheduleFlow.collectAsState(initial = null)
+    val parentPin by prefs.parentPinFlow.collectAsState(initial = null)
+    var showRemove by remember { mutableStateOf(false) }
 
     LaunchedEffect(pairId) {
         if (pairId.isNullOrBlank()) {
@@ -181,7 +188,82 @@ fun ChildScreen(prefs: Prefs) {
                 optional.forEach { OptionalRow(it) }
             }
         }
+
+        RemoveProtectionCard(onClick = { showRemove = true })
     }
+
+    if (showRemove) {
+        RemoveProtectionDialog(
+            expectedPinHash = parentPin,
+            onDismiss = { showRemove = false },
+            onConfirmed = {
+                ProtectionManager.release(context)
+                showRemove = false
+            },
+        )
+    }
+}
+
+/** Parent-only escape hatch: tear down protection on this device so it can be uninstalled. */
+@Composable
+private fun RemoveProtectionCard(onClick: () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Opções do responsável", style = MaterialTheme.typography.titleSmall)
+            Text(
+                "Para desinstalar o Morpheus, primeiro remova a proteção aqui.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = onClick) { Text("Remover proteção deste aparelho") }
+        }
+    }
+}
+
+@Composable
+private fun RemoveProtectionDialog(
+    expectedPinHash: String?,
+    onDismiss: () -> Unit,
+    onConfirmed: () -> Unit,
+) {
+    var pin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Remover proteção?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Isto desliga o bloqueio e a proteção contra remoção. Depois você poderá " +
+                        "desinstalar o app em Configurações → Apps → Morpheus.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (expectedPinHash != null) {
+                    OutlinedTextField(
+                        value = pin,
+                        onValueChange = { pin = it.filter(Char::isDigit); error = false },
+                        label = { Text("PIN do responsável") },
+                        singleLine = true,
+                        isError = error,
+                    )
+                    if (error) Text("PIN incorreto", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (expectedPinHash == null || Pin.hash(pin) == expectedPinHash) onConfirmed()
+                else error = true
+            }) { Text("Remover proteção") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
 }
 
 @Composable

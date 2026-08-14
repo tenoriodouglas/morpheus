@@ -121,6 +121,10 @@ dependencies {
     // QR pairing: generate on the child, scan on the parent (bundles zxing core).
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
 
+    // In-app updates: prompt/apply a new version from Play when the app opens.
+    implementation("com.google.android.play:app-update:2.1.0")
+    implementation("com.google.android.play:app-update-ktx:2.1.0")
+
     // Location (child location for the parent, geofence, SOS).
     implementation("com.google.android.gms:play-services-location:21.3.0")
     // await() bridge for Play Services Tasks.
