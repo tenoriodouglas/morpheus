@@ -28,7 +28,13 @@
 
     <!-- Location is temporarily disabled for the first Play release to avoid the
          background-location review (video + prominent disclosure). It will be
-         re-added in a later update with the proper in-app disclosure flow. -->
+         re-added in a later update with the proper in-app disclosure flow.
+         Explicitly strip the location permissions from the MERGED manifest so a
+         transitive dependency (e.g. play-services-location) can't reintroduce
+         them into the shipped bundle. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove" />
 
     <!-- QR pairing scan (parent). -->
     <uses-permission android:name="android.permission.CAMERA" />
