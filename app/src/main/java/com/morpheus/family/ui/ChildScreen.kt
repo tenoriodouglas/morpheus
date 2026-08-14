@@ -525,7 +525,15 @@ private fun OptionalRow(step: SetupStep) {
 
 @Composable
 private fun LiveBlockCard(schedule: Schedule?, appPolicy: AppPolicy) {
-    val now = System.currentTimeMillis()
+    // Re-tick so the card flips when a scheduled window starts/ends even if the
+    // parent hasn't pushed anything and nothing else recomposes.
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(30_000L)
+            now = System.currentTimeMillis()
+        }
+    }
     val s = schedule
     val manual = s?.manualState(now) ?: Schedule.NONE
     var blocked = s?.isBlockedAt(now) ?: false

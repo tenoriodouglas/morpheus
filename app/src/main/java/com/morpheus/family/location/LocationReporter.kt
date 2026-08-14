@@ -24,6 +24,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.tasks.await
 
 /**
@@ -89,6 +91,10 @@ object LocationReporter {
      * Upload the current position and, at most every [ROUTE_MIN_SPACING_MS],
      * append it to the pruned 24h route. Route growth is decoupled from the
      * (much faster) live cadence so the Firestore doc stays small.
+     *
+     * The route read-modify-write is guarded by [routeMutex] so a live-stream fix
+     * and a periodic fix can't interleave and drop points; the two uploads (live
+     * position, and position+route) are collapsed into a single Firestore write.
      */
     private suspend fun recordAndUpload(
         context: Context,
@@ -97,21 +103,29 @@ object LocationReporter {
         lng: Double,
         at: Long,
     ) {
-        RemoteRepository.reportLocation(context, pairId, lat, lng, at)
-        if (at - lastRouteAppend >= ROUTE_MIN_SPACING_MS) {
+        // Serialize the append and decide, under the lock, whether this fix also
+        // grows the route — otherwise two concurrent callers both read the old
+        // history and one overwrites the other's appended point.
+        val historyJson: String? = routeMutex.withLock {
+            if (at - lastRouteAppend < ROUTE_MIN_SPACING_MS) return@withLock null
             lastRouteAppend = at
             val prefs = Prefs(context)
             val history = prefs.locationHistory().appendPruned(LocationPoint(lat, lng, at), at)
             prefs.setLocationHistory(history)
-            RemoteRepository.reportLocationHistory(context, pairId, LocationHistory.encode(history), at)
+            LocationHistory.encode(history)
         }
+        RemoteRepository.reportLocation(context, pairId, lat, lng, at, historyJson, at)
     }
+
+    private val routeMutex = Mutex()
 
     @Volatile
     private var lastRouteAppend = 0L
 
     @Volatile
     private var liveUntil = 0L
+
+    @Volatile
     private var liveCallback: LocationCallback? = null
 
     /**
@@ -120,6 +134,11 @@ object LocationReporter {
      * once the window lapses (checked on each fix) it auto-stops back to the
      * periodic cadence. Idempotent.
      */
+    // setLive/stopLive are @Synchronized so the "already streaming?" check and the
+    // callback (un)registration are atomic — concurrent callers (the parent's
+    // policy pushes on an IO thread, and the streaming callback stopping itself on
+    // the main thread) can't both pass the null check and register two callbacks.
+    @Synchronized
     @SuppressLint("MissingPermission")
     fun setLive(context: Context, pairId: String, geofence: Geofence, untilMillis: Long) {
         liveUntil = untilMillis
@@ -149,6 +168,7 @@ object LocationReporter {
         runCatching { client.requestLocationUpdates(request, cb, Looper.getMainLooper()) }
     }
 
+    @Synchronized
     fun stopLive(context: Context) {
         val cb = liveCallback ?: return
         liveCallback = null

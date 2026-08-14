@@ -80,6 +80,11 @@ object RemoteRepository {
             if (!awaitSignIn() || cancelled) return@launch
             val reg = doc(pairId).addSnapshotListener { snap, err ->
                 if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+                // Skip the optimistic local echo of our own un-acked writes: the
+                // server-confirmed snapshot (hasPendingWrites == false) follows and
+                // carries the same data. This stops the child re-applying policy on
+                // every heartbeat/status write it makes to the same document.
+                if (snap.metadata.hasPendingWrites()) return@addSnapshotListener
                 onSnapshot(snap)
             }
             if (cancelled) reg.remove() else inner = reg
@@ -209,8 +214,26 @@ object RemoteRepository {
 
     // ---- Child -> parent location & usage -------------------------------------
 
-    fun reportLocation(context: Context, pairId: String, lat: Double, lng: Double, at: Long) {
-        write(context, pairId, mapOf("lat" to lat, "lng" to lng, "locAt" to at))
+    /**
+     * Child: publish the current position and, optionally, the rolling 24h route
+     * in the same write. Collapsing the two into one [write] halves the Firestore
+     * traffic on the frequent live-streaming path.
+     */
+    fun reportLocation(
+        context: Context,
+        pairId: String,
+        lat: Double,
+        lng: Double,
+        at: Long,
+        historyJson: String? = null,
+        historyAt: Long = at,
+    ) {
+        val data = mutableMapOf<String, Any>("lat" to lat, "lng" to lng, "locAt" to at)
+        if (historyJson != null) {
+            data["locHistoryJson"] = historyJson
+            data["locHistoryAt"] = historyAt
+        }
+        write(context, pairId, data)
     }
 
     fun listenLocation(
@@ -222,11 +245,6 @@ object RemoteRepository {
             val at = snap.getLong("locAt") ?: 0L
             if (at > 0L) onLocation(snap.getDouble("lat") ?: 0.0, snap.getDouble("lng") ?: 0.0, at)
         }
-    }
-
-    /** Child: publish the rolling 24h route (JSON). */
-    fun reportLocationHistory(context: Context, pairId: String, historyJson: String, at: Long) {
-        write(context, pairId, mapOf("locHistoryJson" to historyJson, "locHistoryAt" to at))
     }
 
     /** Parent: observe the child's 24h route. */
@@ -258,9 +276,13 @@ object RemoteRepository {
 
     // ---- Child -> parent live status (screen time, current app, blocks) -------
 
-    /** Child: publish the periodic transparency snapshot for the parent's dashboard. */
+    /**
+     * Child: publish the periodic transparency snapshot for the parent's dashboard.
+     * Also stamps `lastSeen` so the online heartbeat rides the same write instead
+     * of costing a second round-trip every tick.
+     */
     fun reportStatus(context: Context, pairId: String, statusJson: String, at: Long) {
-        write(context, pairId, mapOf("statusJson" to statusJson, "statusAt" to at))
+        write(context, pairId, mapOf("statusJson" to statusJson, "statusAt" to at, "lastSeen" to at))
     }
 
     /** Parent: observe the child's live status snapshot. */

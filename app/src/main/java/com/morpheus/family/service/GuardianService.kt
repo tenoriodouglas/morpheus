@@ -10,7 +10,9 @@ import android.os.IBinder
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.google.firebase.firestore.ListenerRegistration
+import com.morpheus.family.data.AppPolicy
 import com.morpheus.family.data.Prefs
+import com.morpheus.family.data.Schedule
 import com.morpheus.family.location.LocationReporter
 import com.morpheus.family.notify.ChildNotifications
 import com.morpheus.family.R
@@ -19,10 +21,12 @@ import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.schedule.ScheduleEnforcer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Long-lived supervisor on the child device. Shows the permanent, transparent
@@ -41,6 +45,17 @@ class GuardianService : LifecycleService() {
     // re-apply a stale block after a newer "unblock" already ran.
     private val applyMutex = Mutex()
 
+    // Snapshots are stamped in arrival order (the listener callback is
+    // single-threaded); the coroutines that apply them can win the mutex in a
+    // different order, so we drop any snapshot older than the newest applied.
+    private val policySeq = AtomicLong(0)
+    private var lastAppliedSeq = 0L
+
+    // Last enforced (schedule, appPolicy) so a snapshot that changed nothing but
+    // the heartbeat/liveUntil doesn't re-persist and re-arm alarms every tick.
+    // Touched only under applyMutex.
+    private var lastEnforced: Pair<Schedule, AppPolicy>? = null
+
     override fun onCreate() {
         super.onCreate()
         startForegroundCompat()
@@ -56,7 +71,7 @@ class GuardianService : LifecycleService() {
      */
     private fun startForegroundCompat() {
         val notif = ChildNotifications.ongoing(this, getString(R.string.managed_text))
-        runCatching {
+        val ok = runCatching {
             if (Build.VERSION.SDK_INT >= 34) {
                 var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
                 if (LocationReporter.hasPermission(this)) {
@@ -66,7 +81,11 @@ class GuardianService : LifecycleService() {
             } else {
                 startForeground(ChildNotifications.ONGOING_ID, notif)
             }
-        }
+        }.isSuccess
+        // A started service that never reaches foreground is killed (with an ANR
+        // crash) by the system; stop cleanly instead. The watchdog revives us
+        // once starting in the foreground is allowed again.
+        if (!ok) stopSelf()
     }
 
     /**
@@ -88,13 +107,21 @@ class GuardianService : LifecycleService() {
         RemoteRepository.ensureSignedIn(ctx)
         lifecycleScope.launch {
             val prefs = Prefs(ctx)
-            // Re-attach the Firestore listener whenever the paired id changes.
-            prefs.pairedIdFlow.collect { pairId ->
+            // Re-attach the Firestore listener only when the paired id truly
+            // changes — DataStore re-emits the whole prefs on every unrelated edit.
+            prefs.pairedIdFlow.distinctUntilChanged().collect { pairId ->
                 policyListener?.remove()
+                lastEnforced = null // new document: force the next apply
                 policyListener = if (pairId.isNullOrBlank()) null else
                     RemoteRepository.listenPolicy(ctx, pairId) { policy ->
+                        // Stamp arrival order on the (serialized) callback thread.
+                        val seq = policySeq.incrementAndGet()
                         lifecycleScope.launch(Dispatchers.IO) {
                             applyMutex.withLock {
+                                // Drop a snapshot that a newer one already superseded.
+                                if (seq < lastAppliedSeq) return@withLock
+                                lastAppliedSeq = seq
+
                                 if (policy.releaseRequestedAt > prefs.lastRelease()) {
                                     // Parent asked to remove protection: disable
                                     // the schedule, remember the request, tear down.
@@ -102,13 +129,24 @@ class GuardianService : LifecycleService() {
                                     prefs.setSchedule(policy.schedule.copy(enabled = false))
                                     LocationReporter.stopLive(ctx)
                                     ProtectionManager.release(ctx)
-                                } else {
+                                    return@withLock
+                                }
+
+                                // Live-streaming window is a cheap, idempotent
+                                // timestamp update — always refresh it so the map
+                                // stays live even when nothing else changed.
+                                LocationReporter.setLive(
+                                    ctx, pairId, policy.appPolicy.geofence, policy.liveUntil,
+                                )
+
+                                // Only persist + re-enforce when the enforced
+                                // policy actually changed (time-based re-checks are
+                                // driven separately by the boundary alarm).
+                                val enforced = policy.schedule to policy.appPolicy
+                                if (enforced != lastEnforced) {
+                                    lastEnforced = enforced
                                     prefs.setSchedule(policy.schedule)
                                     prefs.setAppPolicy(policy.appPolicy)
-                                    // Parent-gated live-location streaming window.
-                                    LocationReporter.setLive(
-                                        ctx, pairId, policy.appPolicy.geofence, policy.liveUntil,
-                                    )
                                     ScheduleEnforcer.apply(ctx)
                                 }
                             }
@@ -155,6 +193,9 @@ class GuardianService : LifecycleService() {
     override fun onDestroy() {
         policyListener?.remove()
         policyListener = null
+        // Stop any live-location streaming so it can't outlive the service and
+        // keep the GPS awake after we're gone.
+        LocationReporter.stopLive(applicationContext)
         super.onDestroy()
     }
 

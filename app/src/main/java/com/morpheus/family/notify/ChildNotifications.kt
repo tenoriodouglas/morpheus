@@ -42,6 +42,19 @@ object ChildNotifications {
         }
     }
 
+    /**
+     * Remove both the persistent notice and any lingering alert — used when the
+     * parent releases protection so no orphaned notification survives the service.
+     */
+    fun cancelAll(context: Context) {
+        runCatching {
+            NotificationManagerCompat.from(context).apply {
+                cancel(ONGOING_ID)
+                cancel(ALERT_ID)
+            }
+        }
+    }
+
     /** Post a one-shot alert when the block state changes. */
     fun postTransition(context: Context, title: String, text: String) {
         val n = NotificationCompat.Builder(context, MorpheusApp.CHANNEL_ALERTS)

@@ -225,7 +225,8 @@ object ScheduleEnforcer {
             budgetMinutes = appPolicy.dailyScreenBudgetMinutes,
             usageAccessGranted = hasUsage,
         )
-        RemoteRepository.reportHeartbeat(context, pairId, now)
+        // reportStatus stamps lastSeen too, so this single write also serves as
+        // the online heartbeat.
         RemoteRepository.reportStatus(context, pairId, ChildStatus.encode(status), now)
 
         // Location is far more expensive than the rest of the snapshot, so it

@@ -51,5 +51,13 @@ class GuardianWatchdogWorker(
                 )
             }
         }
+
+        /**
+         * Stop reviving the guardian — used when the parent releases protection,
+         * otherwise the watchdog would restart the service ~15 min later.
+         */
+        fun cancel(context: Context) {
+            runCatching { WorkManager.getInstance(context).cancelUniqueWork(NAME) }
+        }
     }
 }

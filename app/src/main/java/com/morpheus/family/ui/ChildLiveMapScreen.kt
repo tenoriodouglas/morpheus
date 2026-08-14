@@ -35,6 +35,9 @@ import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
 import java.io.File
 
+/** Cap for a single live-viewing session (see the heartbeat loop below). */
+private const val LIVE_SESSION_MS = 30L * 60 * 1000
+
 /**
  * Live location + last-24h route on a keyless OpenStreetMap (osmdroid) map.
  *
@@ -47,16 +50,6 @@ import java.io.File
 fun ChildLiveMapScreen(prefs: Prefs, child: ChildRef, onBack: () -> Unit) {
     val context = LocalContext.current
     val remoteAvailable = remember { RemoteRepository.available(context) }
-
-    // osmdroid one-time config: private cache dir, no storage permission needed.
-    LaunchedEffect(Unit) {
-        Configuration.getInstance().apply {
-            userAgentValue = context.packageName
-            val base = File(context.cacheDir, "osmdroid")
-            osmdroidBasePath = base
-            osmdroidTileCache = File(base, "tiles")
-        }
-    }
 
     var lat by remember { mutableStateOf<Double?>(null) }
     var lng by remember { mutableStateOf(0.0) }
@@ -76,16 +69,29 @@ fun ChildLiveMapScreen(prefs: Prefs, child: ChildRef, onBack: () -> Unit) {
         onDispose { regs.forEach { it.remove() } }
     }
 
-    // Keep a live-streaming window open on the child while this screen is shown.
+    // Keep a live-streaming window open on the child while this screen is shown,
+    // but cap the whole session: if the parent leaves the map open for hours the
+    // child shouldn't stream high-accuracy GPS (and drain its battery) forever.
+    // The child auto-reverts to the periodic cadence once the last window lapses.
     LaunchedEffect(child.id, remoteAvailable) {
         if (!remoteAvailable) return@LaunchedEffect
-        while (true) {
+        val sessionEnd = System.currentTimeMillis() + LIVE_SESSION_MS
+        while (System.currentTimeMillis() < sessionEnd) {
             RemoteRepository.requestLive(context, child.id, System.currentTimeMillis() + 120_000L)
             delay(60_000L)
         }
     }
 
     val mapView = remember {
+        // Configure osmdroid BEFORE constructing MapView: the tile cache
+        // (SqlTileWriter) reads osmdroidTileCache at construction time, so a
+        // late config leaves the map grey.
+        Configuration.getInstance().apply {
+            userAgentValue = context.packageName
+            val base = File(context.cacheDir, "osmdroid")
+            osmdroidBasePath = base
+            osmdroidTileCache = File(base, "tiles")
+        }
         MapView(context).apply {
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
