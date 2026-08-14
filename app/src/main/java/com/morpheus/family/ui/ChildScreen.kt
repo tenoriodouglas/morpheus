@@ -58,6 +58,7 @@ import com.morpheus.family.admin.MorpheusDeviceAdminReceiver
 import com.morpheus.family.admin.ProtectionManager
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.enforcement.UsageTracker
+import com.morpheus.family.location.LocationReporter
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.service.GuardianService
 import com.morpheus.family.util.Pin
@@ -91,6 +92,9 @@ fun ChildScreen(prefs: Prefs) {
     val schedule by prefs.scheduleFlow.collectAsState(initial = null)
     val parentPin by prefs.parentPinFlow.collectAsState(initial = null)
     var showRemove by remember { mutableStateOf(false) }
+    // Location is opt-in and gated behind a prominent disclosure (Play policy).
+    var showLocationDisclosure by remember { mutableStateOf(false) }
+    var showBackgroundDisclosure by remember { mutableStateOf(false) }
 
     LaunchedEffect(pairId) {
         if (pairId.isNullOrBlank()) {
@@ -106,6 +110,19 @@ fun ChildScreen(prefs: Prefs) {
     val vpnLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { refresh++; GuardianService.start(context) }
+    // Foreground location first; Android only accepts the background request
+    // afterwards, and as a prompt of its own.
+    val locationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { granted ->
+        refresh++
+        val ok = granted.values.any { it }
+        if (ok && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) showBackgroundDisclosure = true
+        if (ok) GuardianService.start(context)
+    }
+    val backgroundLocationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { refresh++ }
     val adminLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { refresh++ }
@@ -128,6 +145,9 @@ fun ChildScreen(prefs: Prefs) {
     val vpnReady = remember(refresh) { VpnService.prepare(context) == null }
     val adminReady = remember(refresh) { isAdminActive(context) }
     val usageReady = remember(refresh) { UsageTracker.hasUsageAccess(context) }
+    val locReady = remember(refresh) { LocationReporter.hasPermission(context) }
+    val locBgReady = remember(refresh) { LocationReporter.hasBackgroundPermission(context) }
+    val batteryOk = remember(refresh) { LocationReporter.isBatteryUnrestricted(context) }
 
     val steps = buildList {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -144,7 +164,16 @@ fun ChildScreen(prefs: Prefs) {
         add(SetupStep("⏱️", "Contador de tempo", "Mostra quanto tempo cada app foi usado.", usageReady, false) {
             runCatching { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }
         })
-        add(SetupStep("🔋", "Sempre desperto", "Mantém o escudo ligado o tempo todo.", null, false) {
+        add(SetupStep("📍", "Localização", "Mostra ao responsável onde este celular está.", locReady, false) {
+            showLocationDisclosure = true
+        })
+        // Only worth asking once the foreground grant exists.
+        if (locReady && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            add(SetupStep("🗺️", "Localização o tempo todo", "Necessário para os avisos de área segura.", locBgReady, false) {
+                showBackgroundDisclosure = true
+            })
+        }
+        add(SetupStep("🔋", "Sempre desperto", "Mantém o escudo e a localização funcionando.", batteryOk, false) {
             runCatching { context.startActivity(batteryIntent()) }
         })
     }
@@ -178,7 +207,12 @@ fun ChildScreen(prefs: Prefs) {
                 },
                 onSos = {
                     scope.launch {
-                        RemoteRepository.reportAlert(context, id, "sos", System.currentTimeMillis())
+                        val now = System.currentTimeMillis()
+                        RemoteRepository.reportAlert(context, id, "sos", now)
+                        // Best-effort: attach where the child is, if allowed.
+                        runCatching {
+                            LocationReporter.reportOnce(context, id, prefs.appPolicy().geofence, now)
+                        }
                     }
                 },
             )
@@ -192,6 +226,35 @@ fun ChildScreen(prefs: Prefs) {
         TransparencyCard()
 
         RemoveProtectionCard(onClick = { showRemove = true })
+    }
+
+    if (showLocationDisclosure) {
+        LocationDisclosureDialog(
+            onAccept = {
+                showLocationDisclosure = false
+                locationLauncher.launch(
+                    arrayOf(
+                        android.Manifest.permission.ACCESS_FINE_LOCATION,
+                        android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                    ),
+                )
+            },
+            onDismiss = { showLocationDisclosure = false },
+        )
+    }
+
+    if (showBackgroundDisclosure) {
+        BackgroundLocationDialog(
+            onContinue = {
+                showBackgroundDisclosure = false
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    backgroundLocationLauncher.launch(
+                        android.Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+                    )
+                }
+            },
+            onDismiss = { showBackgroundDisclosure = false },
+        )
     }
 
     if (showRemove) {
@@ -224,6 +287,10 @@ private fun TransparencyCard() {
             Text("• Quanto tempo você usa o celular por dia", style = MaterialTheme.typography.bodySmall)
             Text("• Quais apps você mais usa e qual está aberto agora", style = MaterialTheme.typography.bodySmall)
             Text("• Se a tela está ligada e quais apps estão bloqueados", style = MaterialTheme.typography.bodySmall)
+            Text(
+                "• Onde este celular está — só se você permitir a localização",
+                style = MaterialTheme.typography.bodySmall,
+            )
             Spacer(Modifier.height(4.dp))
             Text(
                 "Ele NÃO vê suas mensagens, fotos, senhas ou o que aparece na tela. " +

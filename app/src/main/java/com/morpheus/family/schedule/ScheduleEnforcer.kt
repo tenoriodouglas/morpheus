@@ -133,7 +133,17 @@ object ScheduleEnforcer {
         )
         RemoteRepository.reportHeartbeat(context, pairId, now)
         RemoteRepository.reportStatus(context, pairId, ChildStatus.encode(status), now)
+
+        // Location is far more expensive than the rest of the snapshot, so it
+        // rides a slower cadence instead of every tick.
+        if (now - lastLocationReport >= LOCATION_INTERVAL_MS) {
+            lastLocationReport = now
+            runCatching { LocationReporter.reportOnce(context, pairId, appPolicy.geofence, now) }
+        }
     }
+
+    @Volatile
+    private var lastLocationReport = 0L
 
     /** Which managed apps are blocked right now, and why — mirrors [AppEnforcer.apply]. */
     private fun blockedAppsNow(
@@ -219,4 +229,5 @@ object ScheduleEnforcer {
 
     private const val REQ_CODE = 7100
     private const val DEFAULT_RECHECK_MS = 60L * 60 * 1000 // hourly safety net
+    private const val LOCATION_INTERVAL_MS = 15L * 60 * 1000 // battery-friendly cadence
 }

@@ -26,15 +26,15 @@
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
 
-    <!-- Location is temporarily disabled for the first Play release to avoid the
-         background-location review (video + prominent disclosure). It will be
-         re-added in a later update with the proper in-app disclosure flow.
-         Explicitly strip the location permissions from the MERGED manifest so a
-         transitive dependency (e.g. play-services-location) can't reintroduce
-         them into the shipped bundle. -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" tools:node="remove" />
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove" />
+    <!-- Location: shows the guardian where the child device is and powers the
+         geofence (safe-area) alerts. Requested in-app only after a prominent
+         disclosure, background access is asked for separately, and the child
+         device permanently displays the managed-device notice. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- Required from Android 14 for a foreground service that reads location. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
 
     <!-- QR pairing scan (parent). -->
     <uses-permission android:name="android.permission.CAMERA" />
@@ -129,7 +129,7 @@
         <service
             android:name=".service.GuardianService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|location">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the parental-control schedule enforced and shows the transparent managed-device status." />

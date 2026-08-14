@@ -13,6 +13,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -34,13 +35,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import com.google.firebase.firestore.ListenerRegistration
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import com.morpheus.family.data.AppPolicy
 import com.morpheus.family.data.BlockWindow
 import com.morpheus.family.data.ChildRef
 import com.morpheus.family.data.ChildStatus
+import com.morpheus.family.data.Geofence
 import com.morpheus.family.data.KnownApps
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
@@ -550,7 +555,126 @@ private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Uni
 
         ChildMonitorCard(child)
 
+        ChildLocationCard(prefs, child)
+
         AppRulesEditor(prefs, child)
+    }
+}
+
+/**
+ * Where the child device is, plus the safe-area (geofence) the child evaluates
+ * locally. Uses a plain map intent instead of bundling a maps SDK.
+ */
+@Composable
+private fun ChildLocationCard(prefs: Prefs, child: ChildRef) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val remoteAvailable = remember { RemoteRepository.available(context) }
+
+    var location by remember { mutableStateOf<Triple<Double, Double, Long>?>(null) }
+    DisposableEffect(child.id, remoteAvailable) {
+        val reg = if (remoteAvailable) {
+            RemoteRepository.listenLocation(context, child.id) { lat, lng, at ->
+                location = Triple(lat, lng, at)
+            }
+        } else null
+        onDispose { reg?.remove() }
+    }
+
+    val current by prefs.childAppPolicyFlow(child.id).collectAsState(initial = AppPolicy())
+    val fence = current.geofence
+
+    fun persist(newFence: Geofence) {
+        scope.launch {
+            val updated = current.copy(geofence = newFence)
+            prefs.setChildAppPolicy(child.id, updated)
+            RemoteRepository.pushAppPolicy(context, child.id, updated)
+        }
+    }
+
+    val fmt = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("📍 Localização", style = MaterialTheme.typography.titleMedium)
+
+            val loc = location
+            if (loc == null) {
+                Text(
+                    "Sem localização recente. Ative a localização no celular do filho " +
+                        "(passo “Localização” no app dele).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text("Última posição em ${fmt.format(Date(loc.third))}",
+                    style = MaterialTheme.typography.bodyMedium)
+                Text("%.5f, %.5f".format(loc.first, loc.second),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedButton(
+                    onClick = {
+                        val uri = Uri.parse(
+                            "geo:${loc.first},${loc.second}?q=${loc.first},${loc.second}(${child.name})",
+                        )
+                        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Abrir no mapa") }
+            }
+
+            HorizontalDivider()
+
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Área segura (avisos)", style = MaterialTheme.typography.titleSmall)
+                Switch(
+                    checked = fence.enabled,
+                    onCheckedChange = { persist(fence.copy(enabled = it)) },
+                )
+            }
+
+            if (fence.enabled) {
+                OutlinedTextField(
+                    value = fence.name,
+                    onValueChange = { persist(fence.copy(name = it)) },
+                    label = { Text("Nome (ex.: Casa, Escola)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    if (fence.lat == 0.0 && fence.lng == 0.0) "Centro ainda não definido."
+                    else "Centro: %.5f, %.5f".format(fence.lat, fence.lng),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val loc2 = location
+                OutlinedButton(
+                    onClick = {
+                        loc2?.let { persist(fence.copy(lat = it.first, lng = it.second)) }
+                    },
+                    enabled = loc2 != null,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Usar a posição atual do filho como centro") }
+
+                Text("Raio: ${fence.radiusMeters} m", style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(100, 200, 500, 1000).forEach { r ->
+                        OutlinedButton(onClick = { persist(fence.copy(radiusMeters = r)) }) {
+                            Text("${r}m")
+                        }
+                    }
+                }
+                Text(
+                    "O responsável recebe um aviso quando o aparelho entra ou sai desta área.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 

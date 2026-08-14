@@ -5,6 +5,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
+import android.os.Build
+import android.os.PowerManager
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -27,6 +29,31 @@ object LocationReporter {
             PackageManager.PERMISSION_GRANTED ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Whether location also works with the app in the background. Android 10+
+     * gates this behind a separate grant that can only be requested *after* the
+     * foreground one; before API 29 the foreground grant already covers it.
+     */
+    fun hasBackgroundPermission(context: Context): Boolean {
+        if (!hasPermission(context)) return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return true
+        return ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_BACKGROUND_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    /**
+     * Whether the system will let us run unthrottled. Without this, Doze can
+     * delay location updates for long stretches, so the setup wizard asks for it
+     * whenever location is enabled.
+     */
+    fun isBatteryUnrestricted(context: Context): Boolean {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        return runCatching { pm.isIgnoringBatteryOptimizations(context.packageName) }
+            .getOrDefault(false)
+    }
 
     /** Fetch the current location, upload it, and evaluate the geofence. */
     // Permission is verified via hasPermission() before any location call below;
