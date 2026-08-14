@@ -117,7 +117,19 @@ jobs:
           VERSION_CODE: ${{ github.run_number }}00
         run: ./gradlew bundleRelease --stacktrace
 
+      # Publish the signed AAB as a downloadable artifact BEFORE trying Play,
+      # so a manual test run always yields the .aab even if the Play upload
+      # can't run yet (app not created on Play).
+      - name: Upload signed AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: morpheus-release-aab
+          path: app/build/outputs/bundle/release/*.aab
+          if-no-files-found: error
+
       - name: Upload to Google Play
+        # Manual test runs don't fail if the app isn't on Play yet; tag releases do.
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
         uses: r0adkll/upload-google-play@v1
         with:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
@@ -125,10 +137,3 @@ jobs:
           releaseFiles: app/build/outputs/bundle/release/app-release.aab
           track: ${{ github.event.inputs.track || 'internal' }}
           status: completed
-
-      - name: Upload AAB artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: morpheus-release-aab
-          path: app/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
