@@ -18,6 +18,9 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,7 +38,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.content.Context
 import android.content.Intent
+import android.location.Geocoder
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import com.google.firebase.firestore.ListenerRegistration
@@ -51,8 +56,10 @@ import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.util.Pin
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -130,6 +137,7 @@ private fun ParentDashboard(
     var codeInput by remember { mutableStateOf("") }
     var nameInput by remember { mutableStateOf("") }
     var confirmRelease by remember { mutableStateOf<ChildRef?>(null) }
+    val snackbar = remember { SnackbarHostState() }
 
     // Listen for alerts (tamper/SOS/geofence) and requests from each child.
     val alerts = remember { mutableStateMapOf<String, Pair<String, Long>>() }
@@ -160,14 +168,24 @@ private fun ParentDashboard(
             RemoteRepository.pushAppPolicy(context, child.id, ap)
             RemoteRepository.clearRequest(context, child.id)
             requests.remove(child.id)
+            snackbar.showSnackbar("✅ +30 min liberados para ${child.name}")
         }
     }
     fun denyRequest(child: ChildRef) {
-        scope.launch { RemoteRepository.clearRequest(context, child.id); requests.remove(child.id) }
+        scope.launch {
+            RemoteRepository.clearRequest(context, child.id)
+            requests.remove(child.id)
+            snackbar.showSnackbar("Pedido de ${child.name} recusado")
+        }
     }
 
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { padding ->
     Column(
-        modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp)
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Row(
@@ -300,7 +318,9 @@ private fun ParentDashboard(
                                 val seed = prefs.childSchedule(id)
                                 prefs.setChildSchedule(id, seed)
                                 RemoteRepository.pushPolicy(context, id, seed)
+                                val shown = nameInput.trim().ifBlank { id }
                                 codeInput = ""; nameInput = ""
+                                snackbar.showSnackbar("✅ $shown conectado!")
                             }
                         }
                     },
@@ -325,15 +345,22 @@ private fun ParentDashboard(
                 onOpen = { onOpenChild(child.id) },
                 onBlockNow = {
                     scope.launch {
-                        val s = prefs.childSchedule(child.id)
-                            .copy(manualBlockUntil = System.currentTimeMillis() + 60 * 60 * 1000)
-                        prefs.setChildSchedule(child.id, s)
-                        RemoteRepository.pushPolicy(context, child.id, s)
+                        val sched = prefs.childSchedule(child.id).copy(
+                            enabled = true,
+                            manualBlockUntil = System.currentTimeMillis() + 60L * 60 * 1000,
+                        )
+                        prefs.setChildSchedule(child.id, sched)
+                        RemoteRepository.pushPolicy(context, child.id, sched)
+                        snackbar.showSnackbar(
+                            if (remoteAvailable) "🚫 Internet de ${child.name} bloqueada por 1 hora"
+                            else "Sem conexão remota — a regra vale quando o celular sincronizar",
+                        )
                     }
                 },
                 onRequestRelease = { confirmRelease = child },
             )
         }
+    }
     }
 
     val releasing = confirmRelease
@@ -491,10 +518,13 @@ private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Uni
     val current = schedule ?: Schedule()
     val window = current.windows.firstOrNull() ?: BlockWindow(22 * 60, 6 * 60 + 30)
 
-    fun persist(newSchedule: Schedule) {
+    val snackbar = remember { SnackbarHostState() }
+
+    fun persist(newSchedule: Schedule, toast: String? = null) {
         scope.launch {
             prefs.setChildSchedule(child.id, newSchedule)
             RemoteRepository.pushPolicy(context, child.id, newSchedule)
+            toast?.let { snackbar.showSnackbar(it) }
         }
     }
 
@@ -503,8 +533,13 @@ private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Uni
         persist(current.copy(windows = listOf(newWindow) + rest))
     }
 
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { padding ->
     Column(
-        modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp)
+            .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         TextButton(onClick = onBack) { Text("← Voltar aos filhos") }
@@ -543,13 +578,19 @@ private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Uni
 
         Button(
             onClick = {
-                persist(current.copy(manualBlockUntil = System.currentTimeMillis() + 60 * 60 * 1000))
+                persist(
+                    current.copy(
+                        enabled = true,
+                        manualBlockUntil = System.currentTimeMillis() + 60L * 60 * 1000,
+                    ),
+                    "🚫 Internet bloqueada por 1 hora",
+                )
             },
             modifier = Modifier.fillMaxWidth().height(52.dp),
         ) { Text("Bloquear agora por 1 hora") }
 
         OutlinedButton(
-            onClick = { persist(current.copy(manualBlockUntil = 0L)) },
+            onClick = { persist(current.copy(manualBlockUntil = 0L), "Bloqueio imediato cancelado") },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Cancelar bloqueio imediato") }
 
@@ -559,7 +600,35 @@ private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Uni
 
         AppRulesEditor(prefs, child)
     }
+    }
 }
+
+/**
+ * Address -> coordinates, so the parent never types latitude/longitude. Uses the
+ * platform [Geocoder] (no maps SDK, no API key). Blocking call, hence IO.
+ */
+private suspend fun lookupCoordinates(context: Context, query: String): Pair<Double, Double>? =
+    withContext(Dispatchers.IO) {
+        if (query.isBlank() || !Geocoder.isPresent()) return@withContext null
+        @Suppress("DEPRECATION") // The async overload only exists from API 33.
+        val hit = runCatching {
+            Geocoder(context, Locale.getDefault()).getFromLocationName(query, 1)
+        }.getOrNull()?.firstOrNull() ?: return@withContext null
+        hit.latitude to hit.longitude
+    }
+
+/** Coordinates -> a readable address for display, or null when unavailable. */
+private suspend fun lookupAddress(context: Context, lat: Double, lng: Double): String? =
+    withContext(Dispatchers.IO) {
+        if (!Geocoder.isPresent()) return@withContext null
+        @Suppress("DEPRECATION")
+        val hit = runCatching {
+            Geocoder(context, Locale.getDefault()).getFromLocation(lat, lng, 1)
+        }.getOrNull()?.firstOrNull() ?: return@withContext null
+        listOfNotNull(hit.thoroughfare, hit.subLocality ?: hit.locality)
+            .joinToString(", ")
+            .ifBlank { hit.getAddressLine(0) }
+    }
 
 /**
  * Where the child device is, plus the safe-area (geofence) the child evaluates
@@ -645,31 +714,91 @@ private fun ChildLocationCard(prefs: Prefs, child: ChildRef) {
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(
-                    if (fence.lat == 0.0 && fence.lng == 0.0) "Centro ainda não definido."
-                    else "Centro: %.5f, %.5f".format(fence.lat, fence.lng),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+
+                // Pick the centre by address instead of typing coordinates.
+                var query by remember(child.id) { mutableStateOf("") }
+                var searching by remember(child.id) { mutableStateOf(false) }
+                var searchError by remember(child.id) { mutableStateOf<String?>(null) }
+                var centreAddress by remember(child.id) { mutableStateOf<String?>(null) }
+
+                // Show the saved centre as a readable address.
+                LaunchedEffect(fence.lat, fence.lng) {
+                    centreAddress = if (fence.lat == 0.0 && fence.lng == 0.0) null
+                    else lookupAddress(context, fence.lat, fence.lng)
+                }
+
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it; searchError = null },
+                    label = { Text("Buscar endereço") },
+                    placeholder = { Text("Rua, número, cidade") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
                 )
+                Button(
+                    onClick = {
+                        scope.launch {
+                            searching = true
+                            searchError = null
+                            val found = lookupCoordinates(context, query)
+                            searching = false
+                            if (found == null) {
+                                searchError = "Endereço não encontrado. Tente incluir a cidade."
+                            } else {
+                                persist(fence.copy(lat = found.first, lng = found.second))
+                                query = ""
+                            }
+                        }
+                    },
+                    enabled = query.isNotBlank() && !searching,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (searching) "Buscando…" else "🔎 Usar este endereço") }
+
+                searchError?.let {
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                }
+
                 val loc2 = location
                 OutlinedButton(
-                    onClick = {
-                        loc2?.let { persist(fence.copy(lat = it.first, lng = it.second)) }
-                    },
+                    onClick = { loc2?.let { persist(fence.copy(lat = it.first, lng = it.second)) } },
                     enabled = loc2 != null,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Usar a posição atual do filho como centro") }
+                ) { Text("📍 Usar onde ${child.name} está agora") }
+
+                // Current centre, as an address when we can resolve one.
+                Text(
+                    when {
+                        fence.lat == 0.0 && fence.lng == 0.0 -> "Centro ainda não definido."
+                        centreAddress != null -> "Centro: $centreAddress"
+                        else -> "Centro definido ✓"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (fence.lat != 0.0 || fence.lng != 0.0) {
+                    OutlinedButton(
+                        onClick = {
+                            val uri = Uri.parse(
+                                "geo:${fence.lat},${fence.lng}?q=${fence.lat},${fence.lng}(${fence.name.ifBlank { "Área segura" }})",
+                            )
+                            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Ver a área no mapa") }
+                }
 
                 Text("Raio: ${fence.radiusMeters} m", style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(100, 200, 500, 1000).forEach { r ->
-                        OutlinedButton(onClick = { persist(fence.copy(radiusMeters = r)) }) {
-                            Text("${r}m")
+                        val selected = fence.radiusMeters == r
+                        if (selected) {
+                            Button(onClick = { persist(fence.copy(radiusMeters = r)) }) { Text("${r}m") }
+                        } else {
+                            OutlinedButton(onClick = { persist(fence.copy(radiusMeters = r)) }) { Text("${r}m") }
                         }
                     }
                 }
                 Text(
-                    "O responsável recebe um aviso quando o aparelho entra ou sai desta área.",
+                    "Você recebe um aviso quando o aparelho entra ou sai desta área.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

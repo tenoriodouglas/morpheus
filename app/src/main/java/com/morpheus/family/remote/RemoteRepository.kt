@@ -11,6 +11,11 @@ import com.google.firebase.ktx.Firebase
 import com.morpheus.family.data.AppPolicy
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 /**
  * Real-time parent -> child channel over Cloud Firestore.
@@ -28,11 +33,60 @@ object RemoteRepository {
     fun available(context: Context): Boolean =
         FirebaseApp.getApps(context).isNotEmpty()
 
-    /** Best-effort anonymous sign-in so secured rules accept our requests. */
+    /** Background scope for writes that must wait for anonymous sign-in first. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * Anonymous sign-in, awaited.
+     *
+     * Security rules require `request.auth != null`, so every read and write has
+     * to happen *after* sign-in completes. Firing sign-in and continuing (the
+     * previous behaviour) made the first operations after a cold start fail with
+     * permission-denied and vanish silently.
+     */
+    private suspend fun awaitSignIn(): Boolean {
+        Firebase.auth.currentUser?.let { return true }
+        return runCatching { Firebase.auth.signInAnonymously().await() }.isSuccess &&
+            Firebase.auth.currentUser != null
+    }
+
+    /** Kick off sign-in early (e.g. from the guardian service) so later calls are instant. */
     fun ensureSignedIn(context: Context) {
         if (!available(context)) return
-        if (Firebase.auth.currentUser == null) {
-            runCatching { Firebase.auth.signInAnonymously() }
+        scope.launch { awaitSignIn() }
+    }
+
+    /** Merge [data] into the family doc once authenticated. Fire-and-forget. */
+    private fun write(context: Context, pairId: String, data: Map<String, Any>) {
+        if (!available(context) || pairId.isBlank()) return
+        scope.launch {
+            if (awaitSignIn()) runCatching { doc(pairId).set(data, SetOptions.merge()) }
+        }
+    }
+
+    /**
+     * Attach a snapshot listener once authenticated, returning a registration
+     * that works whether or not sign-in has finished yet.
+     */
+    private fun listen(
+        context: Context,
+        pairId: String,
+        onSnapshot: (com.google.firebase.firestore.DocumentSnapshot) -> Unit,
+    ): ListenerRegistration? {
+        if (!available(context) || pairId.isBlank()) return null
+        var inner: ListenerRegistration? = null
+        var cancelled = false
+        scope.launch {
+            if (!awaitSignIn() || cancelled) return@launch
+            val reg = doc(pairId).addSnapshotListener { snap, err ->
+                if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+                onSnapshot(snap)
+            }
+            if (cancelled) reg.remove() else inner = reg
+        }
+        return ListenerRegistration {
+            cancelled = true
+            inner?.remove()
         }
     }
 
@@ -43,16 +97,18 @@ object RemoteRepository {
      */
     fun joinMembership(context: Context, pairId: String) {
         if (!available(context) || pairId.isBlank()) return
-        ensureSignedIn(context)
-        val uid = Firebase.auth.currentUser?.uid ?: return
-        doc(pairId).set(mapOf("members" to FieldValue.arrayUnion(uid)), SetOptions.merge())
+        scope.launch {
+            if (!awaitSignIn()) return@launch
+            val uid = Firebase.auth.currentUser?.uid ?: return@launch
+            runCatching {
+                doc(pairId).set(mapOf("members" to FieldValue.arrayUnion(uid)), SetOptions.merge())
+            }
+        }
     }
 
     /** Child: heartbeat so the parent can see the device is online. */
     fun reportHeartbeat(context: Context, pairId: String, at: Long) {
-        if (!available(context) || pairId.isBlank()) return
-        ensureSignedIn(context)
-        doc(pairId).set(mapOf("lastSeen" to at), SetOptions.merge())
+        write(context, pairId, mapOf("lastSeen" to at))
     }
 
     /** Parent: observe the child's last-seen heartbeat. */
@@ -61,10 +117,7 @@ object RemoteRepository {
         pairId: String,
         onSeen: (Long) -> Unit,
     ): ListenerRegistration? {
-        if (!available(context) || pairId.isBlank()) return null
-        ensureSignedIn(context)
-        return doc(pairId).addSnapshotListener { snap, err ->
-            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+        return listen(context, pairId) { snap ->
             val at = snap.getLong("lastSeen") ?: 0L
             if (at > 0L) onSeen(at)
         }
@@ -75,20 +128,19 @@ object RemoteRepository {
 
     /** Parent: publish the current policy for the paired child to pick up. */
     fun pushPolicy(context: Context, pairId: String, schedule: Schedule) {
-        if (!available(context) || pairId.isBlank()) return
-        ensureSignedIn(context)
-        val data = mapOf(
-            "scheduleJson" to Prefs.encodeSchedule(schedule),
-            "manualBlockUntil" to schedule.manualBlockUntil,
+        write(
+            context,
+            pairId,
+            mapOf(
+                "scheduleJson" to Prefs.encodeSchedule(schedule),
+                "manualBlockUntil" to schedule.manualBlockUntil,
+            ),
         )
-        doc(pairId).set(data, SetOptions.merge())
     }
 
     /** Parent: publish the per-app policy (rules, budgets, restrictions). */
     fun pushAppPolicy(context: Context, pairId: String, appPolicy: AppPolicy) {
-        if (!available(context) || pairId.isBlank()) return
-        ensureSignedIn(context)
-        doc(pairId).set(mapOf("appPolicyJson" to AppPolicy.encode(appPolicy)), SetOptions.merge())
+        write(context, pairId, mapOf("appPolicyJson" to AppPolicy.encode(appPolicy)))
     }
 
     /**
@@ -97,16 +149,12 @@ object RemoteRepository {
      * only when this is newer than the last release it handled.
      */
     fun requestRelease(context: Context, pairId: String, nowMillis: Long) {
-        if (!available(context) || pairId.isBlank()) return
-        ensureSignedIn(context)
-        doc(pairId).set(mapOf("releaseRequestedAt" to nowMillis), SetOptions.merge())
+        write(context, pairId, mapOf("releaseRequestedAt" to nowMillis))
     }
 
     /** Child: report a tamper/alert event to the parent. */
     fun reportAlert(context: Context, pairId: String, type: String, nowMillis: Long) {
-        if (!available(context) || pairId.isBlank()) return
-        ensureSignedIn(context)
-        doc(pairId).set(mapOf("alert" to type, "alertAt" to nowMillis), SetOptions.merge())
+        write(context, pairId, mapOf("alert" to type, "alertAt" to nowMillis))
     }
 
     /** Parent: listen for the child's latest alert. */
@@ -115,32 +163,22 @@ object RemoteRepository {
         pairId: String,
         onAlert: (type: String, at: Long) -> Unit,
     ): ListenerRegistration? {
-        if (!available(context) || pairId.isBlank()) return null
-        ensureSignedIn(context)
-        return doc(pairId).addSnapshotListener { snap, err ->
-            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
-            val type = snap.getString("alert") ?: return@addSnapshotListener
+        return listen(context, pairId) { snap ->
+            val type = snap.getString("alert")
             val at = snap.getLong("alertAt") ?: 0L
-            onAlert(type, at)
+            if (type != null) onAlert(type, at)
         }
     }
 
     // ---- Child -> parent requests (extra time / unlock) -----------------------
 
     fun reportRequest(context: Context, pairId: String, type: String, note: String, at: Long) {
-        if (!available(context) || pairId.isBlank()) return
-        ensureSignedIn(context)
-        doc(pairId).set(
-            mapOf("reqType" to type, "reqNote" to note, "reqAt" to at),
-            SetOptions.merge(),
-        )
+        write(context, pairId, mapOf("reqType" to type, "reqNote" to note, "reqAt" to at))
     }
 
     /** Parent: clear a handled request so its banner disappears. */
     fun clearRequest(context: Context, pairId: String) {
-        if (!available(context) || pairId.isBlank()) return
-        ensureSignedIn(context)
-        doc(pairId).set(mapOf("reqAt" to 0L), SetOptions.merge())
+        write(context, pairId, mapOf("reqAt" to 0L))
     }
 
     fun listenRequest(
@@ -148,22 +186,18 @@ object RemoteRepository {
         pairId: String,
         onRequest: (type: String, note: String, at: Long) -> Unit,
     ): ListenerRegistration? {
-        if (!available(context) || pairId.isBlank()) return null
-        ensureSignedIn(context)
-        return doc(pairId).addSnapshotListener { snap, err ->
-            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+        return listen(context, pairId) { snap ->
             val at = snap.getLong("reqAt") ?: 0L
-            if (at <= 0L) return@addSnapshotListener
-            onRequest(snap.getString("reqType") ?: "extra", snap.getString("reqNote") ?: "", at)
+            if (at > 0L) {
+                onRequest(snap.getString("reqType") ?: "extra", snap.getString("reqNote") ?: "", at)
+            }
         }
     }
 
     // ---- Child -> parent location & usage -------------------------------------
 
     fun reportLocation(context: Context, pairId: String, lat: Double, lng: Double, at: Long) {
-        if (!available(context) || pairId.isBlank()) return
-        ensureSignedIn(context)
-        doc(pairId).set(mapOf("lat" to lat, "lng" to lng, "locAt" to at), SetOptions.merge())
+        write(context, pairId, mapOf("lat" to lat, "lng" to lng, "locAt" to at))
     }
 
     fun listenLocation(
@@ -171,20 +205,14 @@ object RemoteRepository {
         pairId: String,
         onLocation: (lat: Double, lng: Double, at: Long) -> Unit,
     ): ListenerRegistration? {
-        if (!available(context) || pairId.isBlank()) return null
-        ensureSignedIn(context)
-        return doc(pairId).addSnapshotListener { snap, err ->
-            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+        return listen(context, pairId) { snap ->
             val at = snap.getLong("locAt") ?: 0L
-            if (at <= 0L) return@addSnapshotListener
-            onLocation(snap.getDouble("lat") ?: 0.0, snap.getDouble("lng") ?: 0.0, at)
+            if (at > 0L) onLocation(snap.getDouble("lat") ?: 0.0, snap.getDouble("lng") ?: 0.0, at)
         }
     }
 
     fun reportUsage(context: Context, pairId: String, usageJson: String, at: Long) {
-        if (!available(context) || pairId.isBlank()) return
-        ensureSignedIn(context)
-        doc(pairId).set(mapOf("usageJson" to usageJson, "usageAt" to at), SetOptions.merge())
+        write(context, pairId, mapOf("usageJson" to usageJson, "usageAt" to at))
     }
 
     fun listenUsage(
@@ -192,13 +220,9 @@ object RemoteRepository {
         pairId: String,
         onUsage: (usageJson: String, at: Long) -> Unit,
     ): ListenerRegistration? {
-        if (!available(context) || pairId.isBlank()) return null
-        ensureSignedIn(context)
-        return doc(pairId).addSnapshotListener { snap, err ->
-            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+        return listen(context, pairId) { snap ->
             val at = snap.getLong("usageAt") ?: 0L
-            if (at <= 0L) return@addSnapshotListener
-            onUsage(snap.getString("usageJson") ?: "", at)
+            if (at > 0L) onUsage(snap.getString("usageJson") ?: "", at)
         }
     }
 
@@ -206,9 +230,7 @@ object RemoteRepository {
 
     /** Child: publish the periodic transparency snapshot for the parent's dashboard. */
     fun reportStatus(context: Context, pairId: String, statusJson: String, at: Long) {
-        if (!available(context) || pairId.isBlank()) return
-        ensureSignedIn(context)
-        doc(pairId).set(mapOf("statusJson" to statusJson, "statusAt" to at), SetOptions.merge())
+        write(context, pairId, mapOf("statusJson" to statusJson, "statusAt" to at))
     }
 
     /** Parent: observe the child's live status snapshot. */
@@ -217,13 +239,9 @@ object RemoteRepository {
         pairId: String,
         onStatus: (statusJson: String, at: Long) -> Unit,
     ): ListenerRegistration? {
-        if (!available(context) || pairId.isBlank()) return null
-        ensureSignedIn(context)
-        return doc(pairId).addSnapshotListener { snap, err ->
-            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+        return listen(context, pairId) { snap ->
             val at = snap.getLong("statusAt") ?: 0L
-            if (at <= 0L) return@addSnapshotListener
-            onStatus(snap.getString("statusJson") ?: "", at)
+            if (at > 0L) onStatus(snap.getString("statusJson") ?: "", at)
         }
     }
 
@@ -236,14 +254,14 @@ object RemoteRepository {
         pairId: String,
         onPolicy: (RemotePolicy) -> Unit,
     ): ListenerRegistration? {
-        if (!available(context) || pairId.isBlank()) return null
-        ensureSignedIn(context)
-        return doc(pairId).addSnapshotListener { snap, err ->
-            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
-            val schedule = Prefs.decodeSchedule(snap.getString("scheduleJson"))
-            val appPolicy = AppPolicy.decode(snap.getString("appPolicyJson"))
-            val releaseAt = snap.getLong("releaseRequestedAt") ?: 0L
-            onPolicy(RemotePolicy(schedule, appPolicy, releaseAt))
+        return listen(context, pairId) { snap ->
+            onPolicy(
+                RemotePolicy(
+                    Prefs.decodeSchedule(snap.getString("scheduleJson")),
+                    AppPolicy.decode(snap.getString("appPolicyJson")),
+                    snap.getLong("releaseRequestedAt") ?: 0L,
+                ),
+            )
         }
     }
 }

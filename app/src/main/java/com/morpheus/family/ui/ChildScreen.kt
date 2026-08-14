@@ -30,6 +30,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -183,49 +186,60 @@ fun ChildScreen(prefs: Prefs) {
     val allRequiredDone = requiredDone == required.size
     val currentStep = required.firstOrNull { it.done != true }
 
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        MascotHeader(protected = allRequiredDone)
+    val snackbar = remember { SnackbarHostState() }
+    val remoteReady = remember(refresh) { RemoteRepository.available(context) }
 
-        if (!allRequiredDone && currentStep != null) {
-            WizardCard(currentStep, requiredDone, required.size)
-            PairingCard(pairId)
-        } else {
-            HappyProtectedCard()
-            ScheduleCard(schedule?.let { it.enabled to it.windows.map { w -> w.label() } })
-            val id = pairId
-            if (!id.isNullOrBlank()) HelpCard(
-                onExtra = {
-                    scope.launch {
-                        RemoteRepository.reportRequest(
-                            context, id, "extra", "Pediu mais tempo", System.currentTimeMillis(),
-                        )
-                    }
-                },
-                onSos = {
-                    scope.launch {
-                        val now = System.currentTimeMillis()
-                        RemoteRepository.reportAlert(context, id, "sos", now)
-                        // Best-effort: attach where the child is, if allowed.
-                        runCatching {
-                            LocationReporter.reportOnce(context, id, prefs.appPolicy().geofence, now)
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        containerColor = MaterialTheme.colorScheme.background,
+    ) { padding ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            MascotHeader(protected = allRequiredDone)
+
+            if (!allRequiredDone && currentStep != null) {
+                WizardCard(currentStep, requiredDone, required.size)
+                PairingCard(pairId)
+            } else {
+                HappyProtectedCard()
+                ScheduleCard(schedule?.let { it.enabled to it.windows.map { w -> w.label() } })
+                val id = pairId
+                if (!id.isNullOrBlank()) HelpCard(
+                    enabled = remoteReady,
+                    onExtra = {
+                        scope.launch {
+                            RemoteRepository.reportRequest(
+                                context, id, "extra", "Pediu mais tempo", System.currentTimeMillis(),
+                            )
+                            snackbar.showSnackbar("✅ Pedido enviado ao responsável!")
                         }
-                    }
-                },
-            )
-            PairingCard(pairId)
-            if (optional.any { it.done != true }) {
-                Text("Extras (se quiser) ✨", style = MaterialTheme.typography.titleMedium)
-                optional.forEach { OptionalRow(it) }
+                    },
+                    onSos = {
+                        scope.launch {
+                            val now = System.currentTimeMillis()
+                            RemoteRepository.reportAlert(context, id, "sos", now)
+                            runCatching {
+                                LocationReporter.reportOnce(context, id, prefs.appPolicy().geofence, now)
+                            }
+                            snackbar.showSnackbar("🆘 Aviso enviado ao responsável!")
+                        }
+                    },
+                )
+                PairingCard(pairId)
+                if (optional.any { it.done != true }) {
+                    Text("Extras (se quiser) ✨", style = MaterialTheme.typography.titleMedium)
+                    optional.forEach { OptionalRow(it) }
+                }
             }
+
+            TransparencyCard()
+
+            RemoveProtectionCard(onClick = { showRemove = true })
         }
-
-        TransparencyCard()
-
-        RemoveProtectionCard(onClick = { showRemove = true })
     }
 
     if (showLocationDisclosure) {
@@ -530,22 +544,32 @@ private fun ScheduleCard(state: Pair<Boolean, List<String>>?) {
 }
 
 @Composable
-private fun HelpCard(onExtra: () -> Unit, onSos: () -> Unit) {
+private fun HelpCard(enabled: Boolean, onExtra: () -> Unit, onSos: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Precisa de ajuda?", style = MaterialTheme.typography.titleMedium)
             Button(
                 onClick = onExtra,
+                enabled = enabled,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
             ) { Text("⏰  Pedir mais um tempinho") }
             Button(
                 onClick = onSos,
+                enabled = enabled,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.tertiary,
                     contentColor = MaterialTheme.colorScheme.onTertiary,
                 ),
             ) { Text("🆘  Preciso de ajuda agora") }
+            if (!enabled) {
+                Text(
+                    "Estes botões precisam de conexão com o responsável. " +
+                        "Peça para ele parear este celular.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
