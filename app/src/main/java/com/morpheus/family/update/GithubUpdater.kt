@@ -103,7 +103,7 @@ object GithubUpdater {
             connectTimeout = 15_000
             readTimeout = 60_000
         }
-        conn.inputStream.use { input -> out.outputStream.use { input.copyTo(it) } }
+        conn.inputStream.use { input -> out.outputStream().use { input.copyTo(it) } }
         return out
     }
 }
