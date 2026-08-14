@@ -72,6 +72,10 @@ jobs:
         run: ./gradlew lintDebug --stacktrace
 
       - name: Assemble debug APK
+        # Give the debug APK an increasing versionCode so the GitHub self-updater
+        # can tell builds apart (matches the number written into latest.json).
+        env:
+          VERSION_CODE: ${{ github.run_number }}
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload debug APK
@@ -81,14 +85,19 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
 
-      # Give the APK a stable filename, then publish it to a rolling GitHub
-      # Release so it has a permanent, login-free download link:
+      # Give the APK a stable filename and write the self-update manifest, then
+      # publish both to a rolling GitHub Release so they have permanent,
+      # login-free download links:
       #   https://github.com/tenoriodouglas/morpheus/releases/download/apk-latest/morpheus-latest-debug.apk
-      - name: Stage APK with a stable name
+      #   https://github.com/tenoriodouglas/morpheus/releases/download/apk-latest/latest.json
+      - name: Stage APK and update manifest
         if: github.event_name != 'pull_request'
         run: |
           mkdir -p release-apk
           cp app/build/outputs/apk/debug/*.apk release-apk/morpheus-latest-debug.apk
+          cat > release-apk/latest.json <<EOF
+          {"versionCode": ${{ github.run_number }}, "versionName": "1.0.0", "apkUrl": "https://github.com/tenoriodouglas/morpheus/releases/download/apk-latest/morpheus-latest-debug.apk"}
+          EOF
 
       - name: Publish debug APK to a rolling release
         if: github.event_name != 'pull_request'
@@ -101,7 +110,9 @@ jobs:
             commit. Instala lado a lado com a versão da Play Store
             (pacote com.morpheus.family.debug).
           prerelease: true
-          files: release-apk/morpheus-latest-debug.apk
+          files: |
+            release-apk/morpheus-latest-debug.apk
+            release-apk/latest.json
 
   deploy:
     name: Release to Play Store
