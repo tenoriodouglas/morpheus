@@ -14,6 +14,12 @@ on:
         default: "internal"
         type: choice
         options: [internal, alpha, beta, production]
+      status:
+        description: "Release status. Use 'draft' for the very first upload of an app that has never been published (Play only allows draft releases on a draft app); switch to 'completed' once the app is live to auto-roll-out."
+        required: true
+        default: "draft"
+        type: choice
+        options: [draft, completed]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -136,4 +142,6 @@ jobs:
           packageName: com.morpheus.family
           releaseFiles: app/build/outputs/bundle/release/app-release.aab
           track: ${{ github.event.inputs.track || 'internal' }}
-          status: completed
+          # Tag pushes auto-roll-out (completed); manual dispatch defaults to
+          # draft so the very first upload of a not-yet-published app succeeds.
+          status: ${{ github.event.inputs.status || 'completed' }}
