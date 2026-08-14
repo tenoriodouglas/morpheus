@@ -2,6 +2,7 @@ package com.morpheus.family.ui
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -10,9 +11,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.android.play.core.appupdate.AppUpdateManagerFactory
 import com.google.android.play.core.appupdate.AppUpdateOptions
 import com.google.android.play.core.install.model.AppUpdateType
@@ -22,13 +30,6 @@ import com.morpheus.family.data.Prefs
 import com.morpheus.family.ui.theme.MorpheusTheme
 
 class MainActivity : ComponentActivity() {
-
-    private val updateManager by lazy { AppUpdateManagerFactory.create(this) }
-
-    // If the user backs out of an immediate update, we simply re-prompt on the
-    // next open. Nothing to do with the result here.
-    private val updateLauncher =
-        registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -43,6 +44,9 @@ class MainActivity : ComponentActivity() {
                 ) {
                     // Keep content clear of the status/navigation bars (edge-to-edge).
                     Box(Modifier.fillMaxSize().systemBarsPadding()) {
+                        // Silent update check on every open (renders nothing).
+                        PlayUpdateGate()
+
                         val mode by prefs.modeFlow.collectAsState(initial = AppMode.UNSET)
                         when (mode) {
                             AppMode.UNSET -> ModeSelectionScreen(prefs)
@@ -54,28 +58,43 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
 
-    /**
-     * Silent update check on every open: if Play has a newer version, launch the
-     * immediate in-app update flow (one tap, no navigation to the Store). Also
-     * resumes an update that was already in progress. No-ops on sideloaded/debug
-     * builds, where Play can't serve updates.
-     */
-    override fun onResume() {
-        super.onResume()
-        updateManager.appUpdateInfo.addOnSuccessListener { info ->
-            val available = info.updateAvailability() == UpdateAvailability.UPDATE_AVAILABLE
-            val inProgress =
-                info.updateAvailability() == UpdateAvailability.DEVELOPER_TRIGGERED_UPDATE_IN_PROGRESS
-            if ((available || inProgress) && info.isUpdateTypeAllowed(AppUpdateType.IMMEDIATE)) {
-                runCatching {
-                    updateManager.startUpdateFlowForResult(
-                        info,
-                        updateLauncher,
-                        AppUpdateOptions.defaultOptions(AppUpdateType.IMMEDIATE),
-                    )
+/**
+ * Checks Play for a newer version whenever the app resumes and, if one exists,
+ * launches the immediate in-app update flow (one tap, no Store navigation). Also
+ * resumes an update already in progress. No-ops on sideloaded/debug builds, where
+ * Play can't serve updates. Emits no UI.
+ */
+@Composable
+private fun PlayUpdateGate() {
+    val context = LocalContext.current
+    val updateManager = remember { AppUpdateManagerFactory.create(context) }
+    val launcher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult(),
+    ) { /* If the user backs out, we simply re-prompt on the next open. */ }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val obs = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                updateManager.appUpdateInfo.addOnSuccessListener { info ->
+                    val available = info.updateAvailability() == UpdateAvailability.UPDATE_AVAILABLE
+                    val inProgress = info.updateAvailability() ==
+                        UpdateAvailability.DEVELOPER_TRIGGERED_UPDATE_IN_PROGRESS
+                    if ((available || inProgress) && info.isUpdateTypeAllowed(AppUpdateType.IMMEDIATE)) {
+                        runCatching {
+                            updateManager.startUpdateFlowForResult(
+                                info,
+                                launcher,
+                                AppUpdateOptions.defaultOptions(AppUpdateType.IMMEDIATE),
+                            )
+                        }
+                    }
                 }
             }
         }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 }
