@@ -1,40 +1,72 @@
 package com.morpheus.family.service
 
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
-import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.google.firebase.firestore.ListenerRegistration
-import com.morpheus.family.MorpheusApp
+import com.morpheus.family.data.Prefs
+import com.morpheus.family.location.LocationReporter
+import com.morpheus.family.notify.ChildNotifications
 import com.morpheus.family.R
 import com.morpheus.family.admin.ProtectionManager
-import com.morpheus.family.data.Prefs
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.schedule.ScheduleEnforcer
-import com.morpheus.family.ui.MainActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Long-lived supervisor on the child device. Shows the permanent, transparent
  * "this device is managed" notification (required by Google Play policy for
  * monitoring apps) and re-applies the schedule whenever it is (re)started —
  * on boot, after updates, and when the parent pushes a new policy.
+ *
+ * Built to survive being closed like a messaging app: START_STICKY, a restart
+ * alarm on task removal, and a WorkManager watchdog (see [com.morpheus.family.work]).
  */
 class GuardianService : LifecycleService() {
 
     private var policyListener: ListenerRegistration? = null
 
+    // Serialize policy application so out-of-order Firestore snapshots can't
+    // re-apply a stale block after a newer "unblock" already ran.
+    private val applyMutex = Mutex()
+
     override fun onCreate() {
         super.onCreate()
-        startForeground(NOTIF_ID, buildNotification())
+        startForegroundCompat()
         startRemoteSync()
         startStatusTicker()
+    }
+
+    /**
+     * Start in the foreground with the correct type mask. On Android 14+ the
+     * location FGS type is only added when location permission is held, otherwise
+     * the start throws; wrapped in runCatching so a background revive that isn't
+     * allowed doesn't crash the process.
+     */
+    private fun startForegroundCompat() {
+        val notif = ChildNotifications.ongoing(this, getString(R.string.managed_text))
+        runCatching {
+            if (Build.VERSION.SDK_INT >= 34) {
+                var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                if (LocationReporter.hasPermission(this)) {
+                    type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                }
+                startForeground(ChildNotifications.ONGOING_ID, notif, type)
+            } else {
+                startForeground(ChildNotifications.ONGOING_ID, notif)
+            }
+        }
     }
 
     /**
@@ -62,16 +94,23 @@ class GuardianService : LifecycleService() {
                 policyListener = if (pairId.isNullOrBlank()) null else
                     RemoteRepository.listenPolicy(ctx, pairId) { policy ->
                         lifecycleScope.launch(Dispatchers.IO) {
-                            if (policy.releaseRequestedAt > prefs.lastRelease()) {
-                                // Parent asked to remove protection: disable the
-                                // schedule, remember the request, then tear down.
-                                prefs.setLastRelease(policy.releaseRequestedAt)
-                                prefs.setSchedule(policy.schedule.copy(enabled = false))
-                                ProtectionManager.release(ctx)
-                            } else {
-                                prefs.setSchedule(policy.schedule)
-                                prefs.setAppPolicy(policy.appPolicy)
-                                ScheduleEnforcer.apply(ctx)
+                            applyMutex.withLock {
+                                if (policy.releaseRequestedAt > prefs.lastRelease()) {
+                                    // Parent asked to remove protection: disable
+                                    // the schedule, remember the request, tear down.
+                                    prefs.setLastRelease(policy.releaseRequestedAt)
+                                    prefs.setSchedule(policy.schedule.copy(enabled = false))
+                                    LocationReporter.stopLive(ctx)
+                                    ProtectionManager.release(ctx)
+                                } else {
+                                    prefs.setSchedule(policy.schedule)
+                                    prefs.setAppPolicy(policy.appPolicy)
+                                    // Parent-gated live-location streaming window.
+                                    LocationReporter.setLive(
+                                        ctx, pairId, policy.appPolicy.geofence, policy.liveUntil,
+                                    )
+                                    ScheduleEnforcer.apply(ctx)
+                                }
                             }
                         }
                     }
@@ -86,6 +125,28 @@ class GuardianService : LifecycleService() {
         return START_STICKY
     }
 
+    /**
+     * The child swiped the app away. START_STICKY isn't guaranteed after a task
+     * swipe, so schedule a near-immediate self-restart — the supervisor must keep
+     * running even when the app is closed.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        val app = applicationContext
+        val restart = PendingIntent.getForegroundService(
+            app,
+            RESTART_REQ,
+            Intent(app, GuardianService::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val am = app.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        runCatching {
+            am.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1000, restart,
+            )
+        }
+    }
+
     override fun onBind(intent: Intent): IBinder? {
         super.onBind(intent)
         return null
@@ -97,26 +158,14 @@ class GuardianService : LifecycleService() {
         super.onDestroy()
     }
 
-    private fun buildNotification() =
-        NotificationCompat.Builder(this, MorpheusApp.CHANNEL_STATUS)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle(getString(R.string.managed_title))
-            .setContentText(getString(R.string.managed_text))
-            .setOngoing(true)
-            .setContentIntent(
-                PendingIntent.getActivity(
-                    this, 0, Intent(this, MainActivity::class.java),
-                    PendingIntent.FLAG_IMMUTABLE,
-                ),
-            )
-            .build()
-
     companion object {
-        private const val NOTIF_ID = 4200
         private const val STATUS_INTERVAL_MS = 60_000L
+        private const val RESTART_REQ = 7200
 
         fun start(context: Context) {
-            context.startForegroundService(Intent(context, GuardianService::class.java))
+            runCatching {
+                context.startForegroundService(Intent(context, GuardianService::class.java))
+            }
         }
     }
 }

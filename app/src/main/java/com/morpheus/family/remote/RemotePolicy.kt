@@ -14,4 +14,8 @@ data class RemotePolicy(
     val schedule: Schedule,
     val appPolicy: AppPolicy,
     val releaseRequestedAt: Long,
+    // While in the future, the parent is actively viewing the live map, so the
+    // child should stream frequent location fixes; 0 = keep the battery-saving
+    // periodic cadence.
+    val liveUntil: Long = 0L,
 )

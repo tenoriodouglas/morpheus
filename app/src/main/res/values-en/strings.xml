@@ -8,6 +8,8 @@
     <!-- Notifications -->
     <string name="channel_status_name">Managed device status</string>
     <string name="channel_status_desc">Permanent notice that this device is managed by Morpheus.</string>
+    <string name="channel_alerts_name">Block alerts</string>
+    <string name="channel_alerts_desc">Notifies when the internet or an app is blocked or freed.</string>
     <string name="managed_title">Device managed by Morpheus</string>
     <string name="managed_text">Usage schedule is set by the guardian.</string>
     <string name="blocked_text">Internet blocked by the schedule set by the guardian.</string>

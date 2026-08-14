@@ -129,6 +129,12 @@ dependencies {
     implementation("com.google.android.play:app-update:2.1.0")
     implementation("com.google.android.play:app-update-ktx:2.1.0")
 
+    // Background watchdog that revives the guardian service (WhatsApp-like persistence).
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // Keyless map (OpenStreetMap) for the live location + 24h route view.
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
+
     // Location (child location for the parent, geofence, SOS).
     implementation("com.google.android.gms:play-services-location:21.3.0")
     // await() bridge for Play Services Tasks.

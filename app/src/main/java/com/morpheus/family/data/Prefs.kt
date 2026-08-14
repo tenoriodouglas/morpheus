@@ -45,6 +45,14 @@ class Prefs(private val context: Context) {
         // Child side: last known geofence membership (null until first fix).
         val GEOFENCE_INSIDE = booleanPreferencesKey("geofence_inside")
 
+        // Child side: last enforced block state, for edge-triggered local
+        // notifications when a block starts/ends (null until first evaluation).
+        val LAST_BLOCKED_STATE = booleanPreferencesKey("last_blocked_state")
+
+        // Child side: rolling 24h location history (JSON), mirrored locally so we
+        // never have to read it back from Firestore before appending.
+        val LOC_HISTORY = stringPreferencesKey("loc_history")
+
         // Persisted trusted-time anchor (survives process death, not reboot).
         val ANCHOR_UTC = longPreferencesKey("anchor_utc")
         val ANCHOR_ELAPSED = longPreferencesKey("anchor_elapsed")
@@ -115,6 +123,17 @@ class Prefs(private val context: Context) {
     suspend fun setGeofenceInside(inside: Boolean) =
         context.dataStore.edit { it[Keys.GEOFENCE_INSIDE] = inside }
 
+    // Child last-enforced block state (null = not evaluated yet).
+    suspend fun lastBlockedState(): Boolean? = context.dataStore.data.first()[Keys.LAST_BLOCKED_STATE]
+    suspend fun setLastBlockedState(blocked: Boolean) =
+        context.dataStore.edit { it[Keys.LAST_BLOCKED_STATE] = blocked }
+
+    // Child rolling 24h location history (JSON).
+    suspend fun locationHistory(): LocationHistory =
+        LocationHistory.decode(context.dataStore.data.first()[Keys.LOC_HISTORY])
+    suspend fun setLocationHistory(history: LocationHistory) =
+        context.dataStore.edit { it[Keys.LOC_HISTORY] = LocationHistory.encode(history) }
+
     // Trusted-time anchor: (trustedUtcMillis, elapsedRealtimeAtAnchor). Null if unset.
     suspend fun timeAnchor(): Pair<Long, Long>? {
         val p = context.dataStore.data.first()
@@ -178,21 +197,24 @@ class Prefs(private val context: Context) {
         }
 
         // Compact, dependency-free wire format so the same string round-trips in
-        // DataStore and Firestore and can be unit-tested on a plain JVM:
-        //   "<enabled 0|1>|<manualBlockUntil>|<allowUntil>|<win>;<win>;..."
+        // DataStore and Firestore and can be unit-tested on a plain JVM. Fields
+        // are positional and appended over time (windows never contain '|'):
+        //   "<enabled>|<manualBlockUntil>|<allowUntil>|<win>;<win>;...|<manualUnblockUntil>|<manualSetAt>"
         //   win = "<start>,<end>,<day.day.day>"
+        // Older 4-field strings still decode (new slots default to 0).
 
         fun encodeSchedule(s: Schedule): String {
             val windows = s.windows.joinToString(";") { w ->
                 "${w.startMinutes},${w.endMinutes},${w.days.sorted().joinToString(".")}"
             }
-            return "${if (s.enabled) 1 else 0}|${s.manualBlockUntil}|${s.allowUntil}|$windows"
+            return "${if (s.enabled) 1 else 0}|${s.manualBlockUntil}|${s.allowUntil}|$windows" +
+                "|${s.manualUnblockUntil}|${s.manualSetAt}"
         }
 
         fun decodeSchedule(raw: String?): Schedule {
             if (raw.isNullOrBlank()) return Schedule()
             return runCatching {
-                val parts = raw.split("|", limit = 4)
+                val parts = raw.split("|", limit = 6)
                 val enabled = parts[0] == "1"
                 val manual = parts.getOrNull(1)?.toLongOrNull() ?: 0L
                 val allow = parts.getOrNull(2)?.toLongOrNull() ?: 0L
@@ -214,6 +236,8 @@ class Prefs(private val context: Context) {
                     windows = windows.ifEmpty { Schedule().windows },
                     manualBlockUntil = manual,
                     allowUntil = allow,
+                    manualUnblockUntil = parts.getOrNull(4)?.toLongOrNull() ?: 0L,
+                    manualSetAt = parts.getOrNull(5)?.toLongOrNull() ?: 0L,
                 )
             }.getOrDefault(Schedule())
         }

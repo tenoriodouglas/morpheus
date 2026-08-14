@@ -11,6 +11,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -86,13 +87,21 @@ fun ParentScreen(prefs: Prefs) {
 @Composable
 private fun ParentHome(prefs: Prefs) {
     var selectedChildId by remember { mutableStateOf<String?>(null) }
+    var liveMapChildId by remember { mutableStateOf<String?>(null) }
     val children by prefs.childrenFlow.collectAsState(initial = emptyList())
 
+    val liveMapChild = children.firstOrNull { it.id == liveMapChildId }
     val selected = children.firstOrNull { it.id == selectedChildId }
-    if (selected != null) {
-        ChildScheduleEditor(prefs, selected, onBack = { selectedChildId = null })
-    } else {
-        ParentDashboard(prefs, children, onOpenChild = { selectedChildId = it })
+    when {
+        liveMapChild != null ->
+            ChildLiveMapScreen(prefs, liveMapChild, onBack = { liveMapChildId = null })
+        selected != null ->
+            ChildScheduleEditor(
+                prefs, selected,
+                onBack = { selectedChildId = null },
+                onOpenLiveMap = { liveMapChildId = it },
+            )
+        else -> ParentDashboard(prefs, children, onOpenChild = { selectedChildId = it })
     }
 }
 
@@ -346,17 +355,13 @@ private fun ParentDashboard(
                 prefs = prefs,
                 child = child,
                 onOpen = { onOpenChild(child.id) },
-                onBlockNow = {
+                onSetSchedule = { sched, msg ->
                     scope.launch {
-                        val sched = prefs.childSchedule(child.id).copy(
-                            enabled = true,
-                            manualBlockUntil = System.currentTimeMillis() + 60L * 60 * 1000,
-                        )
                         prefs.setChildSchedule(child.id, sched)
                         RemoteRepository.pushPolicy(context, child.id, sched)
                         snackbar.showSnackbar(
-                            if (remoteAvailable) "🚫 Internet de ${child.name} bloqueada por 1 hora"
-                            else "Sem conexão remota — a regra vale quando o celular sincronizar",
+                            if (remoteAvailable) msg
+                            else "Sem conexão remota — vale quando o celular sincronizar",
                         )
                     }
                 },
@@ -456,7 +461,7 @@ private fun ChildCard(
     prefs: Prefs,
     child: ChildRef,
     onOpen: () -> Unit,
-    onBlockNow: () -> Unit,
+    onSetSchedule: (Schedule, String) -> Unit,
     onRequestRelease: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -479,7 +484,7 @@ private fun ChildCard(
     }
 
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(child.name, style = MaterialTheme.typography.titleLarge)
             Text("Código: ${child.id}", style = MaterialTheme.typography.bodySmall)
             Text(connectionStatus(lastSeen), style = MaterialTheme.typography.bodySmall)
@@ -498,24 +503,83 @@ private fun ChildCard(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            Text(
-                if (!s.enabled) "Bloqueio desligado"
-                else "Janelas: " + s.windows.joinToString(", ") { it.label() },
-                style = MaterialTheme.typography.bodyMedium,
-            )
+
+            // Direct immediate block / unblock, no need to open the editor.
+            val manual = s.manualState(now)
+            val stateLabel = when {
+                manual == Schedule.BLOCK -> "🔒 Internet bloqueada agora (pelo responsável)"
+                manual == Schedule.ALLOW -> "🔓 Internet liberada agora (pelo responsável)"
+                status.internetBlocked && !status.isStale(now) -> "🚫 Internet bloqueada (horário)"
+                else -> "✅ Seguindo o horário"
+            }
+            Text(stateLabel, style = MaterialTheme.typography.bodyMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onOpen) { Text("Editar horários") }
-                OutlinedButton(onClick = onBlockNow) { Text("Bloquear 1h") }
+                Button(
+                    onClick = { onSetSchedule(blockNow(s), "🚫 Internet de ${child.name} bloqueada agora") },
+                    modifier = Modifier.weight(1f),
+                ) { Text("🚫 Bloquear") }
+                Button(
+                    onClick = { onSetSchedule(allowNow(s), "🔓 Internet de ${child.name} liberada agora") },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.onSecondary,
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) { Text("🔓 Liberar") }
+            }
+            if (manual != Schedule.NONE) {
+                TextButton(onClick = {
+                    onSetSchedule(followSchedule(s), "Voltou a seguir o horário")
+                }) { Text("Voltar a seguir o horário") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onOpen) { Text("Abrir controle") }
             }
             TextButton(onClick = onRequestRelease) { Text("Remover proteção / desinstalar") }
         }
     }
 }
 
+// ---- Immediate-action schedule transforms (shared by card and editor) --------
+
+/** Block the internet indefinitely, right now (clears any force-allow). */
+private fun blockNow(s: Schedule): Schedule = s.copy(
+    manualBlockUntil = Long.MAX_VALUE,
+    manualUnblockUntil = 0L,
+    manualSetAt = System.currentTimeMillis(),
+)
+
+/** Force-allow the internet indefinitely, right now (overrides windows). */
+private fun allowNow(s: Schedule): Schedule = s.copy(
+    manualUnblockUntil = Long.MAX_VALUE,
+    manualBlockUntil = 0L,
+    manualSetAt = System.currentTimeMillis(),
+)
+
+/** Clear both manual overrides so the scheduled windows apply again. */
+private fun followSchedule(s: Schedule): Schedule = s.copy(
+    manualBlockUntil = 0L,
+    manualUnblockUntil = 0L,
+    manualSetAt = System.currentTimeMillis(),
+)
+
+/** Block the internet for one hour from now. */
+private fun blockForOneHour(s: Schedule): Schedule = s.copy(
+    manualBlockUntil = System.currentTimeMillis() + 60L * 60 * 1000,
+    manualUnblockUntil = 0L,
+    manualSetAt = System.currentTimeMillis(),
+)
+
 @Composable
-private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Unit) {
+private fun ChildScheduleEditor(
+    prefs: Prefs,
+    child: ChildRef,
+    onBack: () -> Unit,
+    onOpenLiveMap: (String) -> Unit,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val remoteAvailable = remember { RemoteRepository.available(context) }
 
     val schedule by prefs.childScheduleFlow(child.id).collectAsState(initial = Schedule())
     val current = schedule ?: Schedule()
@@ -527,7 +591,11 @@ private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Uni
         scope.launch {
             prefs.setChildSchedule(child.id, newSchedule)
             RemoteRepository.pushPolicy(context, child.id, newSchedule)
-            toast?.let { snackbar.showSnackbar(it) }
+            toast?.let {
+                snackbar.showSnackbar(
+                    if (remoteAvailable) it else "Salvo — vale quando o celular sincronizar",
+                )
+            }
         }
     }
 
@@ -546,26 +614,36 @@ private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Uni
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         TextButton(onClick = onBack) { Text("← Voltar aos filhos") }
-        Text(child.name, style = MaterialTheme.typography.headlineMedium)
+        Text("Controle de ${child.name}", style = MaterialTheme.typography.headlineMedium)
         Text("Código: ${child.id}", style = MaterialTheme.typography.bodySmall)
 
-        Card(Modifier.fillMaxWidth()) {
-            Row(
-                Modifier.fillMaxWidth().padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Bloqueio por horário ativo", style = MaterialTheme.typography.titleMedium)
-                Switch(
-                    checked = current.enabled,
-                    onCheckedChange = { persist(current.copy(enabled = it)) },
-                )
-            }
-        }
+        // ⚡ Immediate actions — block/unblock now, reachable at the top.
+        ImmediateActionsCard(
+            current = current,
+            remoteAvailable = remoteAvailable,
+            onApply = { sched, msg -> persist(sched, msg) },
+        )
 
+        // 🗓️ Scheduled actions — the recurring block window.
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("Janela de bloqueio", style = MaterialTheme.typography.titleMedium)
+                Text("🗓️ Ações agendadas", style = MaterialTheme.typography.titleMedium)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Bloqueio por horário", style = MaterialTheme.typography.bodyLarge)
+                    Switch(
+                        checked = current.enabled,
+                        onCheckedChange = {
+                            persist(
+                                current.copy(enabled = it),
+                                if (it) "Bloqueio por horário ligado" else "Bloqueio por horário desligado",
+                            )
+                        },
+                    )
+                }
                 TimeStepper("Início", window.startMinutes) {
                     updateWindow(window.copy(startMinutes = it))
                 }
@@ -579,30 +657,69 @@ private fun ChildScheduleEditor(prefs: Prefs, child: ChildRef, onBack: () -> Uni
             }
         }
 
-        Button(
-            onClick = {
-                persist(
-                    current.copy(
-                        enabled = true,
-                        manualBlockUntil = System.currentTimeMillis() + 60L * 60 * 1000,
-                    ),
-                    "🚫 Internet bloqueada por 1 hora",
-                )
-            },
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-        ) { Text("Bloquear agora por 1 hora") }
-
-        OutlinedButton(
-            onClick = { persist(current.copy(manualBlockUntil = 0L), "Bloqueio imediato cancelado") },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Cancelar bloqueio imediato") }
-
         ChildMonitorCard(child)
 
-        ChildLocationCard(prefs, child)
+        ChildLocationCard(prefs, child, onOpenLiveMap = { onOpenLiveMap(child.id) })
 
         AppRulesEditor(prefs, child)
     }
+    }
+}
+
+/**
+ * Immediate block / unblock, with a live readout of the current manual override.
+ * Both directions work regardless of the scheduled-block master switch.
+ */
+@Composable
+private fun ImmediateActionsCard(
+    current: Schedule,
+    remoteAvailable: Boolean,
+    onApply: (Schedule, String) -> Unit,
+) {
+    val now = System.currentTimeMillis()
+    val manual = current.manualState(now)
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("⚡ Ações imediatas", style = MaterialTheme.typography.titleMedium)
+            Text(
+                when (manual) {
+                    Schedule.BLOCK -> "🔒 Internet bloqueada agora pelo responsável"
+                    Schedule.ALLOW -> "🔓 Internet liberada agora pelo responsável"
+                    else -> "Seguindo o horário programado"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { onApply(blockNow(current), "🚫 Internet bloqueada agora") },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                ) { Text("🚫 Bloquear") }
+                Button(
+                    onClick = { onApply(allowNow(current), "🔓 Internet liberada agora") },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary,
+                        contentColor = MaterialTheme.colorScheme.onSecondary,
+                    ),
+                    modifier = Modifier.weight(1f).height(48.dp),
+                ) { Text("🔓 Liberar") }
+            }
+            OutlinedButton(
+                onClick = { onApply(blockForOneHour(current), "🚫 Bloqueado por 1 hora") },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Bloquear só por 1 hora") }
+            if (manual != Schedule.NONE) {
+                TextButton(onClick = { onApply(followSchedule(current), "Voltou a seguir o horário") }) {
+                    Text("Voltar a seguir o horário")
+                }
+            }
+            if (!remoteAvailable) {
+                Text(
+                    "Sem conexão remota — as ações valem quando o celular sincronizar.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
@@ -638,7 +755,7 @@ private suspend fun lookupAddress(context: Context, lat: Double, lng: Double): S
  * locally. Uses a plain map intent instead of bundling a maps SDK.
  */
 @Composable
-private fun ChildLocationCard(prefs: Prefs, child: ChildRef) {
+private fun ChildLocationCard(prefs: Prefs, child: ChildRef, onOpenLiveMap: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val remoteAvailable = remember { RemoteRepository.available(context) }
@@ -669,6 +786,10 @@ private fun ChildLocationCard(prefs: Prefs, child: ChildRef) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("📍 Localização", style = MaterialTheme.typography.titleMedium)
+
+            Button(onClick = onOpenLiveMap, modifier = Modifier.fillMaxWidth()) {
+                Text("🗺️ Ver mapa ao vivo e rota (24h)")
+            }
 
             val loc = location
             if (loc == null) {

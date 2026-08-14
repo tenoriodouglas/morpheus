@@ -64,6 +64,49 @@ class ScheduleTest {
     }
 
     @Test
+    fun manualUnblock_overridesScheduleWindow() {
+        val night = listOf(BlockWindow(22 * 60, 6 * 60 + 30))
+        val now = at(2026, Calendar.AUGUST, 13, 23, 0) // normally blocked by the window
+        val s = Schedule(windows = night, manualUnblockUntil = now + 60_000)
+        assertFalse(s.isBlockedAt(now))              // "liberar agora" wins over the window
+        assertTrue(s.isBlockedAt(now + 120_000))     // after it lapses, the window blocks again
+    }
+
+    @Test
+    fun manualBlock_worksEvenWhenScheduleDisabled() {
+        val now = at(2026, Calendar.AUGUST, 13, 15, 0)
+        val s = Schedule(enabled = false, windows = emptyList(), manualBlockUntil = now + 60_000)
+        // An immediate block must work regardless of the scheduled-block master switch.
+        assertTrue(s.isBlockedAt(now))
+    }
+
+    @Test
+    fun manualState_reflectsOverrides() {
+        val now = 1000L
+        assertEquals(Schedule.NONE, Schedule().manualState(now))
+        assertEquals(Schedule.BLOCK, Schedule(manualBlockUntil = now + 1).manualState(now))
+        assertEquals(Schedule.ALLOW, Schedule(manualUnblockUntil = now + 1).manualState(now))
+    }
+
+    @Test
+    fun encodeDecode_roundTripsNewManualFields() {
+        val s = Schedule(manualUnblockUntil = 555L, manualSetAt = 777L)
+        val d = Prefs.decodeSchedule(Prefs.encodeSchedule(s))
+        assertEquals(555L, d.manualUnblockUntil)
+        assertEquals(777L, d.manualSetAt)
+    }
+
+    @Test
+    fun decode_oldFourFieldFormatStillWorks() {
+        // Pre-upgrade wire format (no manualUnblock/manualSetAt slots).
+        val d = Prefs.decodeSchedule("1|0|0|1320,390,1.2.3.4.5.6.7")
+        assertTrue(d.enabled)
+        assertEquals(0L, d.manualUnblockUntil)
+        assertEquals(1, d.windows.size)
+        assertEquals(1320, d.windows[0].startMinutes)
+    }
+
+    @Test
     fun children_roundTripAndUpsertSemantics() {
         val list = listOf(
             ChildRef("ABC123", "João"),

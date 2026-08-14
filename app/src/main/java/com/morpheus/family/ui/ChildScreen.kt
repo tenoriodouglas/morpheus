@@ -2,7 +2,9 @@ package com.morpheus.family.ui
 
 import android.app.admin.DevicePolicyManager
 import android.content.Context
+import android.annotation.SuppressLint
 import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
@@ -59,7 +61,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.morpheus.family.admin.MorpheusDeviceAdminReceiver
 import com.morpheus.family.admin.ProtectionManager
+import com.morpheus.family.data.AppPolicy
 import com.morpheus.family.data.Prefs
+import com.morpheus.family.data.Schedule
 import com.morpheus.family.enforcement.UsageTracker
 import com.morpheus.family.location.LocationReporter
 import com.morpheus.family.remote.RemoteRepository
@@ -93,6 +97,7 @@ fun ChildScreen(prefs: Prefs) {
 
     val pairId by prefs.pairedIdFlow.collectAsState(initial = null)
     val schedule by prefs.scheduleFlow.collectAsState(initial = null)
+    val appPolicy by prefs.appPolicyFlow.collectAsState(initial = AppPolicy())
     val parentPin by prefs.parentPinFlow.collectAsState(initial = null)
     var showRemove by remember { mutableStateOf(false) }
     // Location is opt-in and gated behind a prominent disclosure (Play policy).
@@ -176,8 +181,8 @@ fun ChildScreen(prefs: Prefs) {
                 showBackgroundDisclosure = true
             })
         }
-        add(SetupStep("🔋", "Sempre desperto", "Mantém o escudo e a localização funcionando.", batteryOk, false) {
-            runCatching { context.startActivity(batteryIntent()) }
+        add(SetupStep("🔋", "Sempre desperto", "Mantém o Morpheus rodando mesmo com o app fechado.", batteryOk, false) {
+            runCatching { context.startActivity(batteryIntent(context)) }
         })
     }
     val required = steps.filter { it.required }
@@ -206,7 +211,7 @@ fun ChildScreen(prefs: Prefs) {
                 PairingCard(pairId)
             } else {
                 HappyProtectedCard()
-                ScheduleCard(schedule?.let { it.enabled to it.windows.map { w -> w.label() } })
+                LiveBlockCard(schedule, appPolicy)
                 val id = pairId
                 if (!id.isNullOrBlank()) HelpCard(
                     enabled = remoteReady,
@@ -519,25 +524,43 @@ private fun OptionalRow(step: SetupStep) {
 }
 
 @Composable
-private fun ScheduleCard(state: Pair<Boolean, List<String>>?) {
+private fun LiveBlockCard(schedule: Schedule?, appPolicy: AppPolicy) {
+    val now = System.currentTimeMillis()
+    val s = schedule
+    val manual = s?.manualState(now) ?: Schedule.NONE
+    var blocked = s?.isBlockedAt(now) ?: false
+    val homework = appPolicy.homeworkActive(now)
+    if (manual != Schedule.ALLOW && homework) blocked = true
+
+    val statusText = when {
+        manual == Schedule.BLOCK -> "🚫 Internet bloqueada agora pelo responsável"
+        homework && manual != Schedule.ALLOW -> "📚 Modo tarefa: internet e apps pausados"
+        blocked -> "🚫 Internet bloqueada agora (hora de descanso)"
+        manual == Schedule.ALLOW -> "🔓 Internet liberada pelo responsável"
+        else -> "✅ Tudo liberado agora. Aproveite! 🎈"
+    }
+
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-            contentColor = MaterialTheme.colorScheme.onSurface,
+            containerColor = if (blocked) MaterialTheme.colorScheme.tertiaryContainer
+            else MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = if (blocked) MaterialTheme.colorScheme.onTertiaryContainer
+            else MaterialTheme.colorScheme.onSecondaryContainer,
         ),
     ) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("😴 Sua hora de descanso", style = MaterialTheme.typography.titleMedium)
-            if (state == null || !state.first) {
-                Text("Nenhum horário de descanso agora. Aproveite! 🎈", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                state.second.forEach { Text("• $it") }
+            Text("Agora", style = MaterialTheme.typography.titleMedium)
+            Text(statusText, style = MaterialTheme.typography.bodyLarge)
+            if (s != null && s.enabled && s.windows.isNotEmpty()) {
+                Text(
+                    "Horário de descanso: " + s.windows.joinToString(", ") { it.label() },
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             Text(
                 "Combinado com o seu responsável.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -588,4 +611,9 @@ private fun adminIntent(context: Context): Intent =
         )
     }
 
-private fun batteryIntent(): Intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+// Direct "ignore battery optimizations" dialog for this app. Requires the
+// REQUEST_IGNORE_BATTERY_OPTIMIZATIONS permission (declared in the manifest).
+@SuppressLint("BatteryLife")
+private fun batteryIntent(context: Context): Intent =
+    Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+        .setData(Uri.parse("package:${context.packageName}"))

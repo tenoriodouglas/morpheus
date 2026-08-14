@@ -14,12 +14,20 @@ import kotlinx.coroutines.runBlocking
 class MorpheusMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
-        val manualUntil = message.data["manualBlockUntil"]?.toLongOrNull()
-        if (manualUntil != null) {
+        val block = message.data["manualBlockUntil"]?.toLongOrNull()
+        val unblock = message.data["manualUnblockUntil"]?.toLongOrNull()
+        val setAt = message.data["manualSetAt"]?.toLongOrNull()
+        if (block != null || unblock != null) {
             runBlocking {
                 val prefs = Prefs(applicationContext)
                 val current = prefs.schedule()
-                prefs.setSchedule(current.copy(manualBlockUntil = manualUntil))
+                prefs.setSchedule(
+                    current.copy(
+                        manualBlockUntil = block ?: current.manualBlockUntil,
+                        manualUnblockUntil = unblock ?: current.manualUnblockUntil,
+                        manualSetAt = setAt ?: current.manualSetAt,
+                    ),
+                )
             }
         }
         ScheduleEnforcer.apply(applicationContext)

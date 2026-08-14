@@ -6,6 +6,7 @@ import android.content.Intent
 import com.morpheus.family.data.AppMode
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.service.GuardianService
+import com.morpheus.family.work.GuardianWatchdogWorker
 import kotlinx.coroutines.runBlocking
 
 /**
@@ -18,6 +19,7 @@ class BootReceiver : BroadcastReceiver() {
         val mode = runBlocking { Prefs(app).mode() }
         if (mode == AppMode.CHILD) {
             GuardianService.start(app)
+            GuardianWatchdogWorker.enqueue(app)
         }
     }
 }

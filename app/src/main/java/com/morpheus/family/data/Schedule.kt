@@ -45,11 +45,32 @@ data class Schedule(
     // suspended (used to approve a child's request), unless the parent has an
     // explicit manual block active (which wins).
     val allowUntil: Long = 0L,
+    // Parent "liberar agora" force-allow: while in the future, internet is
+    // explicitly allowed even if a scheduled window is active. 0 = none.
+    val manualUnblockUntil: Long = 0L,
+    // Stamp of the last manual block/unblock/cancel, for auditing and to help
+    // the child pick the freshest intent. Not used for the block decision.
+    val manualSetAt: Long = 0L,
 ) {
+    /** The parent's current manual override at [nowMillis]. */
+    fun manualState(nowMillis: Long): Int = when {
+        // Both set (shouldn't happen — the UI clears the other) -> fail closed.
+        manualBlockUntil > nowMillis && manualUnblockUntil > nowMillis -> BLOCK
+        manualBlockUntil > nowMillis -> BLOCK
+        manualUnblockUntil > nowMillis -> ALLOW
+        else -> NONE
+    }
+
     /** Whether internet should be blocked at [nowMillis] under this policy. */
     fun isBlockedAt(nowMillis: Long): Boolean {
+        // A manual override wins over the master switch, BOTH ways: an immediate
+        // block works even if scheduling is off, and "liberar agora" unblocks
+        // even inside a scheduled window. This is the cancel/unblock fix.
+        when (manualState(nowMillis)) {
+            BLOCK -> return true
+            ALLOW -> return false
+        }
         if (!enabled) return false
-        if (manualBlockUntil > nowMillis) return true
         if (allowUntil > nowMillis) return false
 
         val cal = Calendar.getInstance().apply { timeInMillis = nowMillis }
@@ -70,5 +91,11 @@ data class Schedule(
             }
         }
         return false
+    }
+
+    companion object {
+        const val NONE = 0
+        const val BLOCK = 1
+        const val ALLOW = 2
     }
 }

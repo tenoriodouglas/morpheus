@@ -133,9 +133,22 @@ object RemoteRepository {
             pairId,
             mapOf(
                 "scheduleJson" to Prefs.encodeSchedule(schedule),
+                // Redundant top-level mirrors for the FCM fast-path; the child
+                // reads the full state from scheduleJson.
                 "manualBlockUntil" to schedule.manualBlockUntil,
+                "manualUnblockUntil" to schedule.manualUnblockUntil,
+                "manualSetAt" to schedule.manualSetAt,
             ),
         )
+    }
+
+    /**
+     * Parent: request a live-location window until [untilMillis]. While this is
+     * in the future the child streams frequent fixes; it auto-reverts to the
+     * battery-saving cadence when the window lapses.
+     */
+    fun requestLive(context: Context, pairId: String, untilMillis: Long) {
+        write(context, pairId, mapOf("liveUntil" to untilMillis))
     }
 
     /** Parent: publish the per-app policy (rules, budgets, restrictions). */
@@ -211,6 +224,23 @@ object RemoteRepository {
         }
     }
 
+    /** Child: publish the rolling 24h route (JSON). */
+    fun reportLocationHistory(context: Context, pairId: String, historyJson: String, at: Long) {
+        write(context, pairId, mapOf("locHistoryJson" to historyJson, "locHistoryAt" to at))
+    }
+
+    /** Parent: observe the child's 24h route. */
+    fun listenLocationHistory(
+        context: Context,
+        pairId: String,
+        onHistory: (historyJson: String, at: Long) -> Unit,
+    ): ListenerRegistration? {
+        return listen(context, pairId) { snap ->
+            val at = snap.getLong("locHistoryAt") ?: 0L
+            if (at > 0L) onHistory(snap.getString("locHistoryJson") ?: "", at)
+        }
+    }
+
     fun reportUsage(context: Context, pairId: String, usageJson: String, at: Long) {
         write(context, pairId, mapOf("usageJson" to usageJson, "usageAt" to at))
     }
@@ -260,6 +290,7 @@ object RemoteRepository {
                     Prefs.decodeSchedule(snap.getString("scheduleJson")),
                     AppPolicy.decode(snap.getString("appPolicyJson")),
                     snap.getLong("releaseRequestedAt") ?: 0L,
+                    snap.getLong("liveUntil") ?: 0L,
                 ),
             )
         }

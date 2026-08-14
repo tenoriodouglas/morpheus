@@ -6,14 +6,24 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Build
+import android.os.Looper
 import android.os.PowerManager
 import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import com.morpheus.family.data.Geofence
+import com.morpheus.family.data.LocationHistory
+import com.morpheus.family.data.LocationPoint
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.remote.RemoteRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
 /**
@@ -55,7 +65,9 @@ object LocationReporter {
             .getOrDefault(false)
     }
 
-    /** Fetch the current location, upload it, and evaluate the geofence. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Fetch the current location, upload it (+route), and evaluate the geofence. */
     // Permission is verified via hasPermission() before any location call below;
     // lint can't see through that helper, so suppress its false positive.
     @SuppressLint("MissingPermission")
@@ -69,8 +81,81 @@ object LocationReporter {
             ).await()
         }.getOrNull() ?: runCatching { client.lastLocation.await() }.getOrNull() ?: return
 
-        RemoteRepository.reportLocation(context, pairId, location.latitude, location.longitude, nowMillis)
+        recordAndUpload(context, pairId, location.latitude, location.longitude, nowMillis)
         evaluateGeofence(context, pairId, geofence, location, nowMillis)
+    }
+
+    /**
+     * Upload the current position and, at most every [ROUTE_MIN_SPACING_MS],
+     * append it to the pruned 24h route. Route growth is decoupled from the
+     * (much faster) live cadence so the Firestore doc stays small.
+     */
+    private suspend fun recordAndUpload(
+        context: Context,
+        pairId: String,
+        lat: Double,
+        lng: Double,
+        at: Long,
+    ) {
+        RemoteRepository.reportLocation(context, pairId, lat, lng, at)
+        if (at - lastRouteAppend >= ROUTE_MIN_SPACING_MS) {
+            lastRouteAppend = at
+            val prefs = Prefs(context)
+            val history = prefs.locationHistory().appendPruned(LocationPoint(lat, lng, at), at)
+            prefs.setLocationHistory(history)
+            RemoteRepository.reportLocationHistory(context, pairId, LocationHistory.encode(history), at)
+        }
+    }
+
+    @Volatile
+    private var lastRouteAppend = 0L
+
+    @Volatile
+    private var liveUntil = 0L
+    private var liveCallback: LocationCallback? = null
+
+    /**
+     * Turn frequent live streaming on/off. While [untilMillis] is in the future
+     * and permission is held, the child pushes a fix every ~15s at high accuracy;
+     * once the window lapses (checked on each fix) it auto-stops back to the
+     * periodic cadence. Idempotent.
+     */
+    @SuppressLint("MissingPermission")
+    fun setLive(context: Context, pairId: String, geofence: Geofence, untilMillis: Long) {
+        liveUntil = untilMillis
+        val now = System.currentTimeMillis()
+        val app = context.applicationContext
+        if (untilMillis <= now || pairId.isBlank() || !hasPermission(app)) {
+            stopLive(app)
+            return
+        }
+        if (liveCallback != null) return // already streaming
+        val client = LocationServices.getFusedLocationProviderClient(app)
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, LIVE_INTERVAL_MS)
+            .setMinUpdateIntervalMillis(LIVE_INTERVAL_MS)
+            .build()
+        val cb = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                val loc = result.lastLocation ?: return
+                val n = System.currentTimeMillis()
+                if (n > liveUntil) { stopLive(app); return }
+                scope.launch {
+                    recordAndUpload(app, pairId, loc.latitude, loc.longitude, n)
+                    evaluateGeofence(app, pairId, geofence, loc, n)
+                }
+            }
+        }
+        liveCallback = cb
+        runCatching { client.requestLocationUpdates(request, cb, Looper.getMainLooper()) }
+    }
+
+    fun stopLive(context: Context) {
+        val cb = liveCallback ?: return
+        liveCallback = null
+        runCatching {
+            LocationServices.getFusedLocationProviderClient(context.applicationContext)
+                .removeLocationUpdates(cb)
+        }
     }
 
     private suspend fun evaluateGeofence(
@@ -96,4 +181,7 @@ object LocationReporter {
             }
         }
     }
+
+    private const val LIVE_INTERVAL_MS = 15_000L
+    private const val ROUTE_MIN_SPACING_MS = 60_000L
 }

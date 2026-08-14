@@ -16,6 +16,7 @@ import com.morpheus.family.data.Schedule
 import com.morpheus.family.enforcement.AppEnforcer
 import com.morpheus.family.enforcement.UsageTracker
 import com.morpheus.family.location.LocationReporter
+import com.morpheus.family.notify.ChildNotifications
 import com.morpheus.family.receiver.ScheduleAlarmReceiver
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.time.TrustedTimeProvider
@@ -38,14 +39,11 @@ object ScheduleEnforcer {
         val appPolicy = runBlocking { prefs.appPolicy() }
 
         val t = TrustedTimeProvider.now(context)
-        var blocked = schedule.isBlockedAt(t.millis)
-
-        // Homework/focus mode also blocks internet.
-        if (appPolicy.homeworkActive(t.millis)) blocked = true
+        val manual = schedule.manualState(t.millis)
+        val blocked = internetBlocked(schedule, appPolicy, t.millis, t.tampered)
 
         // Fail closed: a tampered wall clock means block now and warn the parent.
         if (t.tampered) {
-            blocked = true
             runCatching {
                 val pairId = runBlocking { prefs.pairedId() } ?: ""
                 RemoteRepository.reportAlert(context, pairId, "time_tamper", System.currentTimeMillis())
@@ -62,7 +60,104 @@ object ScheduleEnforcer {
         runCatching { AppEnforcer.apply(context, appPolicy, t.millis) }
         runCatching { DeviceRestrictionsManager.apply(context, appPolicy.restrictions) }
 
+        // Tell the child, transparently, what is (not) blocked right now.
+        val reason = blockReason(schedule, appPolicy, t.millis, t.tampered, manual, blocked)
+        runCatching { notifyChild(context, schedule, appPolicy, t.millis, blocked, reason) }
+
         armNextBoundary(context, schedule, t.millis)
+    }
+
+    /** The single source of truth for whether the internet is blocked now. */
+    fun internetBlocked(
+        schedule: Schedule,
+        appPolicy: AppPolicy,
+        nowMillis: Long,
+        tampered: Boolean,
+    ): Boolean {
+        val manual = schedule.manualState(nowMillis)
+        var blocked = schedule.isBlockedAt(nowMillis) // handles manual (both ways), windows, enabled
+        // Homework also blocks the internet, unless the parent freed the device.
+        if (manual != Schedule.ALLOW && appPolicy.homeworkActive(nowMillis)) blocked = true
+        if (tampered) blocked = true
+        return blocked
+    }
+
+    private fun blockReason(
+        schedule: Schedule,
+        appPolicy: AppPolicy,
+        nowMillis: Long,
+        tampered: Boolean,
+        manual: Int,
+        blocked: Boolean,
+    ): String = when {
+        !blocked -> "none"
+        tampered -> "tamper"
+        manual == Schedule.BLOCK -> "manual"
+        appPolicy.homeworkActive(nowMillis) -> "homework"
+        else -> "schedule"
+    }
+
+    /** Update the persistent notice and post a one-shot when the block flips. */
+    private fun notifyChild(
+        context: Context,
+        schedule: Schedule,
+        appPolicy: AppPolicy,
+        nowMillis: Long,
+        blocked: Boolean,
+        reason: String,
+    ) {
+        val appCount = blockedAppsNow(context, appPolicy, nowMillis).size
+        val text = ongoingText(context, blocked, reason, schedule, nowMillis, appCount)
+        ChildNotifications.updateOngoing(context, text)
+
+        val prefs = Prefs(context)
+        val prev = runBlocking { prefs.lastBlockedState() }
+        if (prev == null || prev != blocked) {
+            runBlocking { prefs.setLastBlockedState(blocked) }
+            if (prev != null) {
+                if (blocked) {
+                    ChildNotifications.postTransition(context, "🔒 Uso pausado", text)
+                } else {
+                    ChildNotifications.postTransition(
+                        context, "✅ Liberado", "A internet foi liberada.",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun ongoingText(
+        context: Context,
+        blocked: Boolean,
+        reason: String,
+        schedule: Schedule,
+        nowMillis: Long,
+        appCount: Int,
+    ): String {
+        if (!blocked) {
+            return if (appCount > 0) "$appCount app(s) pausado(s) pelo responsável"
+            else context.getString(com.morpheus.family.R.string.managed_text)
+        }
+        val untilTxt = if (reason == "schedule" || reason == "manual") {
+            nextBoundary(schedule, nowMillis)?.let { " até ${hhmm(it)}" } ?: ""
+        } else {
+            ""
+        }
+        val base = when (reason) {
+            "tamper" -> "🚫 Internet bloqueada (verifique a data e a hora do aparelho)"
+            "manual" -> "🚫 Internet bloqueada agora pelo responsável$untilTxt"
+            "homework" -> "📚 Modo tarefa: internet e apps pausados"
+            else -> "🚫 Internet bloqueada (horário de descanso$untilTxt)"
+        }
+        return if (appCount > 0 && reason != "homework") "$base · $appCount app(s) pausado(s)" else base
+    }
+
+    private fun hhmm(millis: Long): String {
+        val c = java.util.Calendar.getInstance().apply { timeInMillis = millis }
+        return "%02d:%02d".format(
+            c.get(java.util.Calendar.HOUR_OF_DAY),
+            c.get(java.util.Calendar.MINUTE),
+        )
     }
 
     /** Refresh trusted network time, enforce, then upload telemetry. */
@@ -125,8 +220,7 @@ object ScheduleEnforcer {
             totalMinutesToday = if (hasUsage) UsageTracker.totalTodayMinutes(context) else 0,
             topApps = top.map { (pkg, min) -> AppUsage(pkg, UsageTracker.labelFor(context, pkg), min) },
             blockedApps = blockedAppsNow(context, appPolicy, t.millis),
-            internetBlocked = schedule.isBlockedAt(t.millis) ||
-                appPolicy.homeworkActive(t.millis) || t.tampered,
+            internetBlocked = internetBlocked(schedule, appPolicy, t.millis, t.tampered),
             homeworkActive = appPolicy.homeworkActive(t.millis),
             budgetMinutes = appPolicy.dailyScreenBudgetMinutes,
             usageAccessGranted = hasUsage,

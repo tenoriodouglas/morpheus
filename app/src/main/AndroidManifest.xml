@@ -11,6 +11,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Ask the user to exempt Morpheus from battery optimization so enforcement,
+         the background watchdog and live location keep running when the app is
+         closed (like a messaging app). Requested with the child's consent. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Precise schedule toggling at bedtime start/end. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
