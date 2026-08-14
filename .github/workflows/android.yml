@@ -29,6 +29,9 @@ jobs:
   build:
     name: Build & Test
     runs-on: ubuntu-latest
+    # Needed to publish the debug APK to a GitHub Release (direct download link).
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -62,6 +65,28 @@ jobs:
           name: morpheus-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
+
+      # Give the APK a stable filename, then publish it to a rolling GitHub
+      # Release so it has a permanent, login-free download link:
+      #   https://github.com/tenoriodouglas/morpheus/releases/download/apk-latest/morpheus-latest-debug.apk
+      - name: Stage APK with a stable name
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p release-apk
+          cp app/build/outputs/apk/debug/*.apk release-apk/morpheus-latest-debug.apk
+
+      - name: Publish debug APK to a rolling release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: Morpheus — última APK (debug)
+          body: >
+            APK de teste (debug) gerada automaticamente pela CI a partir do último
+            commit. Instala lado a lado com a versão da Play Store
+            (pacote com.morpheus.family.debug).
+          prerelease: true
+          files: release-apk/morpheus-latest-debug.apk
 
   deploy:
     name: Release to Play Store
