@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Política de Privacidade — Morpheus</title>
+<style>
+  :root {
+    --bg: #fbfaff; --card: #ffffff; --text: #1a1b22; --muted: #46464f;
+    --primary: #5a67d8; --border: #e7e7f1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #131318; --card: #1b1b21; --text: #e4e1e9; --muted: #c7c5d0;
+      --primary: #bac3ff; --border: #2a2a33;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    line-height: 1.6; padding: 24px;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  header { text-align: center; margin-bottom: 8px; }
+  .badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 64px; height: 64px; border-radius: 50%;
+    background: color-mix(in srgb, var(--primary) 22%, transparent);
+    font-size: 30px; margin-bottom: 8px;
+  }
+  h1 { font-size: 1.7rem; margin: 6px 0; }
+  h2 { font-size: 1.15rem; margin-top: 28px; color: var(--primary); }
+  .muted { color: var(--muted); }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 18px; padding: 20px 22px; margin-top: 18px;
+  }
+  ul { padding-left: 20px; }
+  li { margin: 6px 0; }
+  .lang { margin-top: 40px; padding-top: 24px; border-top: 1px solid var(--border); }
+  a { color: var(--primary); }
+  footer { text-align: center; margin-top: 32px; font-size: .85rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="badge">🛡️</div>
+    <h1>Morpheus — Política de Privacidade</h1>
+    <p class="muted">Controle parental transparente · Última atualização: 13/08/2026</p>
+  </header>
+
+  <div class="card">
+    <p>O Morpheus é um app de <strong>controle parental transparente</strong>. O aparelho da
+    criança exibe permanentemente um aviso de que é gerenciado. O app <strong>não</strong>
+    grava áudio, câmera ou tela de forma oculta.</p>
+
+    <h2>Dados coletados (modo Filho) e finalidade</h2>
+    <ul>
+      <li><strong>Código de pareamento</strong> (aleatório): vincular o aparelho do filho ao do responsável.</li>
+      <li><strong>Política de uso</strong> (horários, regras de apps, limites): aplicar os bloqueios definidos pelo responsável.</li>
+      <li><strong>Localização</strong> (aproximada/precisa): mostrar a última posição ao responsável e alertas de geofence. Somente com a permissão concedida no aparelho.</li>
+      <li><strong>Resumo de uso de apps</strong> (minutos por app, no dia): relatório de tempo de tela.</li>
+      <li><strong>Sinal de atividade e alertas</strong> (ex.: possível alteração da hora): status de conexão e segurança.</li>
+    </ul>
+
+    <h2>Onde os dados ficam</h2>
+    <p>São sincronizados via <strong>Google Firebase (Cloud Firestore + Authentication)</strong> na
+    conta do responsável que publica o app. Não há outro servidor. O acesso é restrito aos
+    dispositivos pareados (autenticação anônima + regras de segurança por membros).</p>
+
+    <h2>Retenção e exclusão</h2>
+    <p>Os dados permanecem enquanto o pareamento existir. Ao remover a proteção ou desinstalar,
+    o responsável pode excluir o documento do filho no Firestore.</p>
+
+    <h2>O que NÃO fazemos</h2>
+    <ul>
+      <li>Não capturamos microfone, câmera ou tela de forma oculta.</li>
+      <li>Não vendemos nem compartilhamos dados com terceiros para publicidade.</li>
+    </ul>
+
+    <h2>Contato</h2>
+    <p class="muted">Responsável pela publicação: <em>substitua por seu e-mail de contato</em>.</p>
+  </div>
+
+  <div class="lang">
+    <h2>Privacy Policy (English)</h2>
+    <p>Morpheus is a <strong>transparent parental-control</strong> app. The child device permanently
+    shows a "managed device" notice. It does <strong>not</strong> covertly record audio, camera or screen.</p>
+    <ul>
+      <li><strong>Pairing code</strong>: links the child device to the guardian's.</li>
+      <li><strong>Usage policy</strong> (schedules, app rules, limits): to enforce blocks.</li>
+      <li><strong>Location</strong>: shows the last position and geofence alerts, only with granted permission.</li>
+      <li><strong>App usage summary</strong>: screen-time report for the guardian.</li>
+      <li><strong>Heartbeat &amp; alerts</strong> (e.g. clock tampering): connection and safety status.</li>
+    </ul>
+    <p>Data syncs via <strong>Google Firebase (Firestore + Auth)</strong> in the publisher's account;
+    access is limited to the paired devices. We do not covertly capture mic/camera/screen and do not
+    sell data. Data persists while the pairing exists and can be deleted by the guardian.</p>
+  </div>
+
+  <footer class="muted">© 2026 Morpheus</footer>
+</div>
+</body>
+</html>

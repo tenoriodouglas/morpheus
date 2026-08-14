@@ -12,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -164,14 +165,29 @@ private fun ParentDashboard(
         modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text("Modo Responsável", style = MaterialTheme.typography.headlineMedium)
+        Text("Painel da família", style = MaterialTheme.typography.headlineSmall)
 
         if (!remoteAvailable) {
-            Text(
-                "Firebase não configurado neste build — as regras são salvas localmente. " +
-                    "Ative o Firebase (veja o README) para controlar os filhos à distância.",
-                style = MaterialTheme.typography.bodySmall,
-            )
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                ),
+            ) {
+                Row(
+                    Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text("💡", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Controle remoto ainda não ativado. As regras funcionam localmente; " +
+                            "ative o Firebase para controlar os filhos à distância (veja o README).",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
         }
 
         val fmt = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
