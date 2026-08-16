@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.morpheus.family.data.KnownApps
 import com.morpheus.family.ui.theme.MorpheusTheme
 
@@ -33,15 +34,23 @@ class BlockedAppActivity : ComponentActivity() {
             MorpheusTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     Column(
-                        modifier = Modifier.fillMaxSize().padding(32.dp),
+                        modifier = Modifier.fillMaxSize().arcadeGrid().padding(32.dp),
                         verticalArrangement = Arrangement.Center,
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text("⛔", style = MaterialTheme.typography.displayLarge)
+                        BombSprite(size = 120.dp, lit = true)
+                        Text("💥", style = MaterialTheme.typography.displayMedium)
+                        PixelTitle(
+                            "BLOQUEADO",
+                            color = MaterialTheme.colorScheme.tertiary,
+                            fontSize = 22.sp,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
                         Text(
                             "$label está bloqueado agora",
                             style = MaterialTheme.typography.headlineSmall,
                             textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(top = 12.dp),
                         )
                         Text(
                             "O acesso a este app foi limitado pelo responsável neste horário.",

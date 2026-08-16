@@ -1,3 +1,5 @@
 <resources>
-    <style name="Theme.Morpheus" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Morpheus" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/arcade_sky</item>
+    </style>
 </resources>

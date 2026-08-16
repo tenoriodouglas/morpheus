@@ -25,8 +25,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
@@ -71,9 +69,6 @@ import com.morpheus.family.service.GuardianService
 import com.morpheus.family.util.Pin
 import kotlinx.coroutines.launch
 import java.util.UUID
-
-/** The friendly Morpheus mascot — a sleepy little owl that "guards the night". */
-private const val MASCOT = "🦉"
 
 private data class SetupStep(
     val emoji: String,
@@ -200,6 +195,7 @@ fun ChildScreen(prefs: Prefs) {
     ) { padding ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding)
+                .arcadeGrid()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -389,17 +385,11 @@ private fun MascotHeader(protected: Boolean) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.size(64.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) { Text(MASCOT, fontSize = 34.sp) }
-        }
+        BombSprite(size = 68.dp, lit = protected)
         Column {
             Text("Oi! Eu sou o Morpheus", style = MaterialTheme.typography.titleLarge)
             Text(
-                if (protected) "Estou de olho por você 💜" else "Vamos preparar seu celular?",
+                if (protected) "Modo seguro ativado! 💥" else "Vamos preparar seu celular?",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -490,7 +480,7 @@ private fun WizardCard(step: SetupStep, doneCount: Int, total: Int) {
                 textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Button(onClick = step.onClick, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+            PixelButton(onClick = step.onClick, modifier = Modifier.fillMaxWidth()) {
                 Text("Vamos lá!", style = MaterialTheme.typography.titleMedium)
             }
         }
@@ -579,19 +569,17 @@ private fun HelpCard(enabled: Boolean, onExtra: () -> Unit, onSos: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Precisa de ajuda?", style = MaterialTheme.typography.titleMedium)
-            Button(
+            PixelButton(
                 onClick = onExtra,
                 enabled = enabled,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier.fillMaxWidth(),
             ) { Text("⏰  Pedir mais um tempinho") }
-            Button(
+            PixelButton(
                 onClick = onSos,
                 enabled = enabled,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.tertiary,
-                    contentColor = MaterialTheme.colorScheme.onTertiary,
-                ),
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.tertiary,
+                contentColor = MaterialTheme.colorScheme.onTertiary,
             ) { Text("🆘  Preciso de ajuda agora") }
             if (!enabled) {
                 Text(

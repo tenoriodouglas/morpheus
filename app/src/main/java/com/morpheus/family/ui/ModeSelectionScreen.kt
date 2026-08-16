@@ -1,7 +1,7 @@
 package com.morpheus.family.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -9,12 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
@@ -29,51 +24,44 @@ import kotlinx.coroutines.launch
 
 /**
  * First-run screen: the same APK becomes either the controlling (parent) app or
- * the enforced (child) app depending on the choice made here.
+ * the enforced (child) app depending on the choice made here. Styled as an
+ * arcade title screen — bomb mascot, pixel logotype, "insert player" blocks.
  */
 @Composable
 fun ModeSelectionScreen(prefs: Prefs) {
     val scope = rememberCoroutineScope()
     Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+        modifier = Modifier.fillMaxSize().arcadeGrid().padding(horizontal = 24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.size(88.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text("🛡️", fontSize = 40.sp)
-            }
-        }
-        Spacer(Modifier.height(16.dp))
-        Text("Morpheus", style = MaterialTheme.typography.headlineLarge)
-        Spacer(Modifier.height(6.dp))
+        BombSprite(size = 104.dp, lit = true)
+        Spacer(Modifier.height(14.dp))
+        PixelTitle("MORPHEUS", fontSize = 26.sp)
+        Spacer(Modifier.height(12.dp))
         Text(
             "Tempo de tela saudável para a família",
             style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(36.dp))
+        Spacer(Modifier.height(34.dp))
 
         RoleCard(
-            emoji = "🧑‍💼",
+            emoji = "🎮",
             title = "Sou o responsável",
             subtitle = "Controlo e acompanho os aparelhos",
-            container = MaterialTheme.colorScheme.primaryContainer,
-            onColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            container = MaterialTheme.colorScheme.primary,
+            onColor = MaterialTheme.colorScheme.onPrimary,
             onClick = { scope.launch { prefs.setMode(AppMode.PARENT) } },
         )
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(18.dp))
         RoleCard(
             emoji = "📱",
             title = "Este é o celular do filho",
             subtitle = "Aplica os horários e proteções aqui",
-            container = MaterialTheme.colorScheme.secondaryContainer,
-            onColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            container = MaterialTheme.colorScheme.secondary,
+            onColor = MaterialTheme.colorScheme.onSecondary,
             onClick = { scope.launch { prefs.setMode(AppMode.CHILD) } },
         )
 
@@ -82,7 +70,7 @@ fun ModeSelectionScreen(prefs: Prefs) {
             "No celular do filho o aparelho mostra sempre que é gerenciado. " +
                 "O Morpheus nunca grava áudio, câmera ou tela às escondidas.",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.onBackground,
             textAlign = TextAlign.Center,
         )
     }
@@ -97,20 +85,20 @@ private fun RoleCard(
     onColor: androidx.compose.ui.graphics.Color,
     onClick: () -> Unit,
 ) {
-    Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = container, contentColor = onColor),
+    ArcadeBlock(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        color = container,
+        contentColor = onColor,
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(20.dp),
+            Modifier.fillMaxWidth().padding(4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(emoji, fontSize = 34.sp)
             Column {
-                Text(title, style = MaterialTheme.typography.titleMedium)
-                Text(subtitle, style = MaterialTheme.typography.bodyMedium)
+                Text(title, style = MaterialTheme.typography.titleMedium, color = onColor)
+                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = onColor)
             }
         }
     }

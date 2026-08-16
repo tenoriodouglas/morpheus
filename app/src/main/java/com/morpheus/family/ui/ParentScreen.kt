@@ -11,7 +11,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -193,7 +192,7 @@ private fun ParentDashboard(
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
     Column(
-        modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp)
+        modifier = Modifier.fillMaxSize().padding(padding).arcadeGrid().padding(20.dp)
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -201,7 +200,7 @@ private fun ParentDashboard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("🛡️", style = MaterialTheme.typography.headlineSmall)
+            BombSprite(size = 48.dp)
             Column {
                 Text("Painel da família", style = MaterialTheme.typography.headlineSmall)
                 Text(
@@ -513,18 +512,18 @@ private fun ChildCard(
                 else -> "✅ Seguindo o horário"
             }
             Text(stateLabel, style = MaterialTheme.typography.bodyMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                PixelButton(
                     onClick = { onSetSchedule(blockNow(s), "🚫 Internet de ${child.name} bloqueada agora") },
                     modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.tertiary,
+                    contentColor = MaterialTheme.colorScheme.onTertiary,
                 ) { Text("🚫 Bloquear") }
-                Button(
+                PixelButton(
                     onClick = { onSetSchedule(allowNow(s), "🔓 Internet de ${child.name} liberada agora") },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary,
-                        contentColor = MaterialTheme.colorScheme.onSecondary,
-                    ),
                     modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.secondary,
+                    contentColor = MaterialTheme.colorScheme.onSecondary,
                 ) { Text("🔓 Liberar") }
             }
             if (manual != Schedule.NONE) {
@@ -609,7 +608,7 @@ private fun ChildScheduleEditor(
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
     Column(
-        modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp)
+        modifier = Modifier.fillMaxSize().padding(padding).arcadeGrid().padding(20.dp)
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -689,18 +688,18 @@ private fun ImmediateActionsCard(
                 },
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                PixelButton(
                     onClick = { onApply(blockNow(current), "🚫 Internet bloqueada agora") },
-                    modifier = Modifier.weight(1f).height(48.dp),
+                    modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.tertiary,
+                    contentColor = MaterialTheme.colorScheme.onTertiary,
                 ) { Text("🚫 Bloquear") }
-                Button(
+                PixelButton(
                     onClick = { onApply(allowNow(current), "🔓 Internet liberada agora") },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary,
-                        contentColor = MaterialTheme.colorScheme.onSecondary,
-                    ),
-                    modifier = Modifier.weight(1f).height(48.dp),
+                    modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.secondary,
+                    contentColor = MaterialTheme.colorScheme.onSecondary,
                 ) { Text("🔓 Liberar") }
             }
             OutlinedButton(
