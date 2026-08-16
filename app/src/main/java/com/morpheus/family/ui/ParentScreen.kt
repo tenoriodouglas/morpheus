@@ -1,5 +1,6 @@
 package com.morpheus.family.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -576,6 +577,9 @@ private fun ChildScheduleEditor(
     onBack: () -> Unit,
     onOpenLiveMap: (String) -> Unit,
 ) {
+    // Back gesture / button returns to the children dashboard instead of exiting.
+    BackHandler(onBack = onBack)
+
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val remoteAvailable = remember { RemoteRepository.available(context) }

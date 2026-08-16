@@ -1,5 +1,6 @@
 package com.morpheus.family.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -48,6 +49,10 @@ private const val LIVE_SESSION_MS = 30L * 60 * 1000
  */
 @Composable
 fun ChildLiveMapScreen(prefs: Prefs, child: ChildRef, onBack: () -> Unit) {
+    // System back gesture / button returns to the child's control screen instead
+    // of leaving the app (navigation here is state-based, not on the back stack).
+    BackHandler(onBack = onBack)
+
     val context = LocalContext.current
     val remoteAvailable = remember { RemoteRepository.available(context) }
 
