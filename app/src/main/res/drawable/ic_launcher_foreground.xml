@@ -3,30 +3,12 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Fuse (behind the body). -->
-    <path
-        android:strokeColor="#9A6A3A"
-        android:strokeWidth="4"
-        android:strokeLineCap="round"
-        android:pathData="M54,36 C58,28 62,25 68,26" />
-    <!-- Bomb body. -->
-    <path
-        android:fillColor="#0E2038"
-        android:pathData="M24,62 a24,24 0 1,0 48,0 a24,24 0 1,0 -48,0 z" />
-    <!-- Cap on top of the body. -->
-    <path
-        android:fillColor="#0E2038"
-        android:pathData="M42,34 h12 v9 h-12 z" />
-    <!-- Glossy highlight. -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillAlpha="0.85"
-        android:pathData="M34,53 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0 z" />
-    <!-- Spark: orange halo + yellow core. -->
-    <path
-        android:fillColor="#FF7A18"
-        android:pathData="M62,26 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 z" />
-    <path
-        android:fillColor="#FFD23F"
-        android:pathData="M64.5,26 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0 z" />
+    <path android:fillColor="#FF3DA5"
+        android:pathData="M51.25,26.5 h5.5 v2.75 h-5.5 z M48.5,29.25 h11 v2.75 h-11 z" />
+    <path android:fillColor="#35ECFF"
+        android:pathData="M45.75,32 h2.75 v2.75 h-2.75 z M59.5,32 h2.75 v2.75 h-2.75 z M43,34.75 h2.75 v2.75 h-2.75 z M62.25,34.75 h2.75 v2.75 h-2.75 z M40.25,37.5 h2.75 v2.75 h-2.75 z M65,37.5 h2.75 v2.75 h-2.75 z M40.25,40.25 h2.75 v2.75 h-2.75 z M65,40.25 h2.75 v2.75 h-2.75 z M37.5,43 h2.75 v2.75 h-2.75 z M67.75,43 h2.75 v2.75 h-2.75 z M37.5,45.75 h2.75 v2.75 h-2.75 z M67.75,45.75 h2.75 v2.75 h-2.75 z M37.5,48.5 h2.75 v2.75 h-2.75 z M67.75,48.5 h2.75 v2.75 h-2.75 z M37.5,51.25 h2.75 v2.75 h-2.75 z M67.75,51.25 h2.75 v2.75 h-2.75 z M37.5,54 h2.75 v2.75 h-2.75 z M67.75,54 h2.75 v2.75 h-2.75 z M40.25,56.75 h2.75 v2.75 h-2.75 z M65,56.75 h2.75 v2.75 h-2.75 z M40.25,59.5 h2.75 v2.75 h-2.75 z M65,59.5 h2.75 v2.75 h-2.75 z M40.25,62.25 h2.75 v2.75 h-2.75 z M65,62.25 h2.75 v2.75 h-2.75 z M43,65 h2.75 v2.75 h-2.75 z M62.25,65 h2.75 v2.75 h-2.75 z M43,67.75 h2.75 v2.75 h-2.75 z M62.25,67.75 h2.75 v2.75 h-2.75 z M45.75,70.5 h2.75 v2.75 h-2.75 z M59.5,70.5 h2.75 v2.75 h-2.75 z M45.75,73.25 h2.75 v2.75 h-2.75 z M59.5,73.25 h2.75 v2.75 h-2.75 z M48.5,76 h2.75 v2.75 h-2.75 z M56.75,76 h2.75 v2.75 h-2.75 z M51.25,78.75 h5.5 v2.75 h-5.5 z" />
+    <path android:fillColor="#130B2E"
+        android:pathData="M48.5,32 h11 v2.75 h-11 z M45.75,34.75 h16.5 v2.75 h-16.5 z M43,37.5 h22 v2.75 h-22 z M43,40.25 h22 v2.75 h-22 z M40.25,43 h27.5 v2.75 h-27.5 z M40.25,45.75 h27.5 v2.75 h-27.5 z M40.25,48.5 h2.75 v2.75 h-2.75 z M48.5,48.5 h11 v2.75 h-11 z M65,48.5 h2.75 v2.75 h-2.75 z M40.25,51.25 h2.75 v2.75 h-2.75 z M48.5,51.25 h11 v2.75 h-11 z M65,51.25 h2.75 v2.75 h-2.75 z M40.25,54 h27.5 v2.75 h-27.5 z M43,56.75 h22 v2.75 h-22 z M43,59.5 h22 v2.75 h-22 z M43,62.25 h22 v2.75 h-22 z M45.75,65 h16.5 v2.75 h-16.5 z M45.75,67.75 h16.5 v2.75 h-16.5 z M48.5,70.5 h11 v2.75 h-11 z M48.5,73.25 h11 v2.75 h-11 z M51.25,76 h5.5 v2.75 h-5.5 z" />
+    <path android:fillColor="#FF5CC0"
+        android:pathData="M43,48.5 h5.5 v2.75 h-5.5 z M59.5,48.5 h5.5 v2.75 h-5.5 z M43,51.25 h5.5 v2.75 h-5.5 z M59.5,51.25 h5.5 v2.75 h-5.5 z" />
 </vector>
