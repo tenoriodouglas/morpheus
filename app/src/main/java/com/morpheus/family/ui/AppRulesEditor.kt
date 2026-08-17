@@ -96,6 +96,9 @@ fun AppRulesEditor(prefs: Prefs, child: ChildRef) {
         RestrictionSwitch("Impedir alterar data/hora", p.restrictions.lockDateTime) {
             persist(p.copy(restrictions = p.restrictions.copy(lockDateTime = it)))
         }
+        RestrictionSwitch("Bloquear opções de desenvolvedor (anti-GPS falso)", p.restrictions.blockDevOptions) {
+            persist(p.copy(restrictions = p.restrictions.copy(blockDevOptions = it)))
+        }
         RestrictionSwitch("Exigir hora automática", p.restrictions.requireAutoTime) {
             persist(p.copy(restrictions = p.restrictions.copy(requireAutoTime = it)))
         }

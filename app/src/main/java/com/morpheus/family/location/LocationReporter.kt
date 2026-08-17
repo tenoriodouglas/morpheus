@@ -83,6 +83,12 @@ object LocationReporter {
             ).await()
         }.getOrNull() ?: runCatching { client.lastLocation.await() }.getOrNull() ?: return
 
+        // Fake-GPS guard: don't upload a mocked position; warn the parent instead
+        // and keep the last real location on the map.
+        if (isMock(location)) {
+            alertMock(context, pairId, nowMillis)
+            return
+        }
         recordAndUpload(context, pairId, location.latitude, location.longitude, nowMillis)
         evaluateGeofence(context, pairId, geofence, location, nowMillis)
     }
@@ -158,6 +164,7 @@ object LocationReporter {
                 val loc = result.lastLocation ?: return
                 val n = System.currentTimeMillis()
                 if (n > liveUntil) { stopLive(app); return }
+                if (isMock(loc)) { alertMock(app, pairId, n); return }
                 scope.launch {
                     recordAndUpload(app, pairId, loc.latitude, loc.longitude, n)
                     evaluateGeofence(app, pairId, geofence, loc, n)
@@ -202,6 +209,22 @@ object LocationReporter {
         }
     }
 
+    /** True if this fix came from a mock/fake-GPS provider. */
+    @Suppress("DEPRECATION") // isFromMockProvider is the pre-API-31 equivalent of isMock.
+    private fun isMock(loc: Location): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) loc.isMock else loc.isFromMockProvider
+
+    @Volatile
+    private var lastMockAlert = 0L
+
+    /** Warn the parent a fake location was detected, at most every [MOCK_ALERT_MIN_MS]. */
+    private fun alertMock(context: Context, pairId: String, now: Long) {
+        if (pairId.isBlank() || now - lastMockAlert < MOCK_ALERT_MIN_MS) return
+        lastMockAlert = now
+        runCatching { RemoteRepository.reportAlert(context, pairId, "location_mock", now) }
+    }
+
     private const val LIVE_INTERVAL_MS = 15_000L
     private const val ROUTE_MIN_SPACING_MS = 60_000L
+    private const val MOCK_ALERT_MIN_MS = 5L * 60 * 1000
 }

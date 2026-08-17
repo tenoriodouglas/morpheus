@@ -40,6 +40,9 @@ data class DeviceRestrictions(
     val requireAutoTime: Boolean = true,
     // Non-empty = force this DNS-over-TLS host globally (content filtering).
     val safeDnsHost: String = "",
+    // Blocks Developer Options (and USB debugging), which is how a child would
+    // enable a fake-GPS "mock location" app.
+    val blockDevOptions: Boolean = false,
 )
 
 /** An optional geofence the child evaluates locally on each location update. */

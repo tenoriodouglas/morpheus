@@ -247,6 +247,7 @@ private fun ParentDashboard(
             alerts[child.id]?.let { (type, at) ->
                 val what = when (type) {
                     "time_tamper" -> "possível alteração da hora do sistema"
+                    "location_mock" -> "📍 possível localização falsa (app de GPS falso)"
                     "sos" -> "🆘 SOS — pedido de ajuda!"
                     "geofence_enter" -> "chegou na área monitorada"
                     "geofence_exit" -> "saiu da área monitorada"

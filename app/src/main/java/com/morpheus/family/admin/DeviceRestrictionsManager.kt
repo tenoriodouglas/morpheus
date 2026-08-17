@@ -20,6 +20,9 @@ object DeviceRestrictionsManager {
 
         toggle(dpm, admin, UserManager.DISALLOW_INSTALL_APPS, restrictions.blockAppInstall)
         toggle(dpm, admin, UserManager.DISALLOW_CONFIG_DATE_TIME, restrictions.lockDateTime)
+        // Blocks Developer Options / USB debugging — the entry point for enabling
+        // a fake-GPS "mock location" app.
+        toggle(dpm, admin, UserManager.DISALLOW_DEBUGGING_FEATURES, restrictions.blockDevOptions)
         runCatching { dpm.setAutoTimeRequired(admin, restrictions.requireAutoTime) }
 
         // Content filtering: force a family-safe DNS-over-TLS host globally.
