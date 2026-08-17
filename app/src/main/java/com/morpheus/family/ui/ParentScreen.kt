@@ -623,8 +623,10 @@ private fun ChildScheduleEditor(
         Text("Controle de ${child.name}", style = MaterialTheme.typography.headlineMedium)
         Text("Código: ${child.id}", style = MaterialTheme.typography.bodySmall)
 
-        // ⚡ Immediate actions — block/unblock now, reachable at the top.
-        ImmediateActionsCard(
+        // 🌐 Internet — block everything or just specific apps, right now.
+        InternetControlCard(
+            prefs = prefs,
+            child = child,
             current = current,
             remoteAvailable = remoteAvailable,
             onApply = { sched, msg -> persist(sched, msg) },
@@ -817,20 +819,34 @@ private fun SetFixedPinDialog(
 }
 
 /**
- * Immediate block / unblock, with a live readout of the current manual override.
- * Both directions work regardless of the scheduled-block master switch.
+ * Internet control: block everything now (except Morpheus itself, so the child's
+ * location and remote commands keep working) or cut only specific apps'
+ * connection, plus the 1-hour block and "follow schedule" reset. The per-app
+ * toggles edit the child's [AppPolicy] and take effect in real time.
  */
 @Composable
-private fun ImmediateActionsCard(
+private fun InternetControlCard(
+    prefs: Prefs,
+    child: ChildRef,
     current: Schedule,
     remoteAvailable: Boolean,
     onApply: (Schedule, String) -> Unit,
 ) {
-    val now = System.currentTimeMillis()
-    val manual = current.manualState(now)
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val appPolicy by prefs.childAppPolicyFlow(child.id).collectAsState(initial = AppPolicy())
+    val manual = current.manualState(System.currentTimeMillis())
+
+    fun persistPolicy(p: AppPolicy) {
+        scope.launch {
+            prefs.setChildAppPolicy(child.id, p)
+            RemoteRepository.pushAppPolicy(context, child.id, p)
+        }
+    }
+
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("⚡ Ações imediatas", style = MaterialTheme.typography.titleMedium)
+            Text("🌐 Internet", style = MaterialTheme.typography.titleMedium)
             Text(
                 when (manual) {
                     Schedule.BLOCK -> "🔒 Internet bloqueada agora pelo responsável"
@@ -845,28 +861,74 @@ private fun ImmediateActionsCard(
                     modifier = Modifier.weight(1f),
                     color = MaterialTheme.colorScheme.tertiary,
                     contentColor = MaterialTheme.colorScheme.onTertiary,
-                ) { Text("🚫 Bloquear") }
+                ) { Text("🚫 Bloquear tudo") }
                 PixelButton(
                     onClick = { onApply(allowNow(current), "🔓 Internet liberada agora") },
                     modifier = Modifier.weight(1f),
                     color = MaterialTheme.colorScheme.secondary,
                     contentColor = MaterialTheme.colorScheme.onSecondary,
-                ) { Text("🔓 Liberar") }
+                ) { Text("🔓 Liberar tudo") }
             }
             OutlinedButton(
                 onClick = { onApply(blockForOneHour(current), "🚫 Bloqueado por 1 hora") },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Bloquear só por 1 hora") }
+            ) { Text("Bloquear tudo por 1 hora") }
             if (manual != Schedule.NONE) {
                 TextButton(onClick = { onApply(followSchedule(current), "Voltou a seguir o horário") }) {
                     Text("Voltar a seguir o horário")
                 }
             }
+
+            HorizontalDivider()
+
+            Text("Cortar internet de um app específico", style = MaterialTheme.typography.titleSmall)
+            if (appPolicy.apps.isEmpty()) {
+                Text(
+                    "Adicione apps em “Tempo de tela e apps”, mais abaixo, para cortar a internet " +
+                        "de um app sem bloquear o resto do aparelho.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                appPolicy.apps.forEach { rule ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            (if (rule.netBlocked) "🚫 " else "🌐 ") +
+                                rule.label.ifBlank { KnownApps.labelFor(rule.packageName) },
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(
+                            checked = rule.netBlocked,
+                            onCheckedChange = { on ->
+                                persistPolicy(
+                                    appPolicy.copy(
+                                        apps = appPolicy.apps.map {
+                                            if (it.packageName == rule.packageName) it.copy(netBlocked = on) else it
+                                        },
+                                    ),
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+
+            Text(
+                "Mesmo com a internet totalmente bloqueada, você continua vendo a localização do " +
+                    "filho — o Morpheus mantém a própria conexão.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             if (!remoteAvailable) {
                 Text(
                     "Sem conexão remota — as ações valem quando o celular sincronizar.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.error,
                 )
             }
         }
@@ -1090,6 +1152,7 @@ private fun formatMinutes(min: Int): String = when {
 }
 
 private fun reasonLabel(reason: String): String = when (reason) {
+    "manual" -> "internet cortada"
     "homework" -> "modo tarefa"
     "budget" -> "limite do dia"
     "limit" -> "limite do app"

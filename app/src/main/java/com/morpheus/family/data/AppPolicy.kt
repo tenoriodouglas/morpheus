@@ -17,6 +17,8 @@ data class AppRule(
     val label: String = "",
     val windows: List<BlockWindowData> = emptyList(),
     val dailyLimitMinutes: Int = 0,
+    // Manual "cut this app's internet now" toggle (independent of windows/limit).
+    val netBlocked: Boolean = false,
 )
 
 /** Serializable twin of [BlockWindow] (kept separate to avoid touching the tested type). */

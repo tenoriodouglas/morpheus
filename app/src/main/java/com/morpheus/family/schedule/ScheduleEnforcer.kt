@@ -50,19 +50,25 @@ object ScheduleEnforcer {
             }
         }
 
-        if (blocked) {
-            if (vpnConsentGranted(context)) BlockingVpnService.block(context)
+        // Which managed apps must lose internet right now (per-app block).
+        val blockedApps = blockedAppsNow(context, appPolicy, t.millis)
+        val netApps = blockedApps.map { it.pkg }.toSet()
+
+        // One VPN drives both modes: block everything (except Morpheus, so
+        // location + remote control survive) or cut only the per-app packages.
+        if (vpnConsentGranted(context)) {
+            BlockingVpnService.apply(context, blockAll = blocked, apps = netApps)
         } else {
             BlockingVpnService.unblock(context)
         }
 
-        // Per-app blocking + device restrictions.
+        // Device-Owner extras (suspend non-study apps during focus mode) + restrictions.
         runCatching { AppEnforcer.apply(context, appPolicy, t.millis) }
         runCatching { DeviceRestrictionsManager.apply(context, appPolicy.restrictions) }
 
         // Tell the child, transparently, what is (not) blocked right now.
         val reason = blockReason(schedule, appPolicy, t.millis, t.tampered, manual, blocked)
-        runCatching { notifyChild(context, schedule, appPolicy, t.millis, blocked, reason) }
+        runCatching { notifyChild(context, schedule, appPolicy, t.millis, blocked, reason, blockedApps.size) }
 
         armNextBoundary(context, schedule, t.millis)
     }
@@ -105,8 +111,8 @@ object ScheduleEnforcer {
         nowMillis: Long,
         blocked: Boolean,
         reason: String,
+        appCount: Int,
     ) {
-        val appCount = blockedAppsNow(context, appPolicy, nowMillis).size
         val text = ongoingText(context, blocked, reason, schedule, nowMillis, appCount)
         ChildNotifications.updateOngoing(context, text)
 
@@ -253,6 +259,7 @@ object ScheduleEnforcer {
 
         return policy.apps.mapNotNull { rule ->
             val reason = when {
+                rule.netBlocked -> "manual"
                 homework && rule.packageName !in policy.studyApps -> "homework"
                 budgetExceeded -> "budget"
                 policy.isAppBlockedByWindow(rule.packageName, nowMillis) -> "schedule"

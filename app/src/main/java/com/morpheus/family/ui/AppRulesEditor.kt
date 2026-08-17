@@ -196,17 +196,29 @@ private fun AppRuleCard(rule: AppRule, onChange: (AppRule) -> Unit, onRemove: ()
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(rule.label.ifBlank { rule.packageName }, style = MaterialTheme.typography.titleMedium)
+            if (rule.netBlocked) {
+                Text(
+                    "🚫 Internet deste app cortada agora (ligue/desligue no card “🌐 Internet”, no topo).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
 
-            MinuteStepper("Limite diário", rule.dailyLimitMinutes, step = 15) {
+            MinuteStepper("Limite de uso por dia", rule.dailyLimitMinutes, step = 15) {
                 onChange(rule.copy(dailyLimitMinutes = it))
             }
+            Text(
+                "Ao passar do limite, a internet do app é cortada (Wi-Fi e dados).",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Bloquear em horário")
+                Text("Bloquear internet em horário")
                 Switch(
                     checked = hasWindow,
                     onCheckedChange = { on ->

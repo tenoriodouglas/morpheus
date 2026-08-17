@@ -44,6 +44,29 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!-- Package visibility (Android 11+) for the apps we can cut internet from
+         per-app (VpnService.addAllowedApplication resolves each package). Mirrors
+         KnownApps; no QUERY_ALL_PACKAGES needed. -->
+    <queries>
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.zhiliaoapp.musically" />
+        <package android:name="com.instagram.android" />
+        <package android:name="com.whatsapp" />
+        <package android:name="com.facebook.katana" />
+        <package android:name="com.facebook.orca" />
+        <package android:name="com.snapchat.android" />
+        <package android:name="com.twitter.android" />
+        <package android:name="com.kwai.video" />
+        <package android:name="org.telegram.messenger" />
+        <package android:name="com.discord" />
+        <package android:name="tv.twitch.android.app" />
+        <package android:name="com.netflix.mediaclient" />
+        <package android:name="com.roblox.client" />
+        <package android:name="com.mojang.minecraftpe" />
+        <package android:name="com.dts.freefireth" />
+        <package android:name="com.android.chrome" />
+    </queries>
+
     <application
         android:name=".MorpheusApp"
         android:allowBackup="false"

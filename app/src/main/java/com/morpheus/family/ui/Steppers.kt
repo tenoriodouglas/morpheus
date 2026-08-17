@@ -57,6 +57,14 @@ fun ValueStepper(label: String, value: Int, step: Int, suffix: String, min: Int 
     }
 }
 
+/** Friendly duration label: "ilimitado" / "45 min" / "1h 30min" / "8h". */
+fun durationLabel(minutes: Int): String = when {
+    minutes <= 0 -> "ilimitado"
+    minutes < 60 -> "$minutes min"
+    minutes % 60 == 0 -> "${minutes / 60}h"
+    else -> "${minutes / 60}h ${minutes % 60}min"
+}
+
 /** +/- [step] minute stepper for a duration; 0 renders as "ilimitado". */
 @Composable
 fun MinuteStepper(label: String, minutes: Int, step: Int = 15, onChange: (Int) -> Unit) {
@@ -69,7 +77,7 @@ fun MinuteStepper(label: String, minutes: Int, step: Int = 15, onChange: (Int) -
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = { onChange((minutes - step).coerceAtLeast(0)) }) { Text("−") }
             Text(
-                if (minutes <= 0) "ilimitado" else "${minutes} min",
+                durationLabel(minutes),
                 style = MaterialTheme.typography.titleMedium,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.padding(horizontal = 16.dp),

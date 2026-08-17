@@ -6,50 +6,40 @@ import com.morpheus.family.admin.MorpheusDeviceAdminReceiver
 import com.morpheus.family.data.AppPolicy
 
 /**
- * Decides which managed apps must be blocked right now and enforces it.
+ * Device-Owner reinforcement for focus ("dever de casa") mode: while it's active,
+ * non-study managed apps are *suspended* (can't even be opened), not just cut off
+ * from the internet. Everyday internet blocking — global and per-app — is handled
+ * by [com.morpheus.family.vpn.BlockingVpnService], which works without Device
+ * Owner and, importantly, lets the app still open (only its connection is cut).
  *
- * Enforcement path:
- *  - **Device Owner** (strong): suspends/unsuspends packages precisely via
- *    [DevicePolicyManager.setPackagesSuspended] — the app can't even be opened.
- *
- * [blockedNow] is also exposed for any future foreground-based fallback blocker.
+ * No-op unless Morpheus is Device Owner.
  */
 object AppEnforcer {
 
-    /** Packages that should be blocked at the last [apply]. */
+    /** Packages suspended at the last [apply] (for diagnostics/UI). */
     @Volatile
     var blockedNow: Set<String> = emptySet()
         private set
 
     fun apply(context: Context, policy: AppPolicy, nowMillis: Long) {
         val managed = policy.apps.map { it.packageName }
-        if (managed.isEmpty()) {
+        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        if (managed.isEmpty() || !dpm.isDeviceOwnerApp(context.packageName)) {
             blockedNow = emptySet()
             return
         }
 
-        val budgetExceeded = policy.dailyScreenBudgetMinutes > 0 &&
-            UsageTracker.totalTodayMinutes(context) >= policy.dailyScreenBudgetMinutes
-        val homework = policy.homeworkActive(nowMillis)
-
-        val blocked = policy.apps.filter { rule ->
-            // Homework/focus mode blocks every managed app (unless it's a study app).
-            (homework && rule.packageName !in policy.studyApps) ||
-                budgetExceeded ||
-                policy.isAppBlockedByWindow(rule.packageName, nowMillis) ||
-                (rule.dailyLimitMinutes > 0 &&
-                    UsageTracker.todayMinutes(context, rule.packageName) >= rule.dailyLimitMinutes)
-        }.map { it.packageName }.toSet()
-
-        blockedNow = blocked
-
-        val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        if (dpm.isDeviceOwnerApp(context.packageName)) {
-            val admin = MorpheusDeviceAdminReceiver.component(context)
-            val toBlock = blocked.toTypedArray()
-            val toAllow = (managed - blocked).toTypedArray()
-            runCatching { if (toBlock.isNotEmpty()) dpm.setPackagesSuspended(admin, toBlock, true) }
-            runCatching { if (toAllow.isNotEmpty()) dpm.setPackagesSuspended(admin, toAllow, false) }
+        // Only focus mode suspends apps; everything else stays openable.
+        val toSuspend = if (policy.homeworkActive(nowMillis)) {
+            policy.apps.map { it.packageName }.filter { it !in policy.studyApps }.toSet()
+        } else {
+            emptySet()
         }
+        blockedNow = toSuspend
+
+        val admin = MorpheusDeviceAdminReceiver.component(context)
+        val toAllow = (managed.toSet() - toSuspend).toTypedArray()
+        runCatching { if (toSuspend.isNotEmpty()) dpm.setPackagesSuspended(admin, toSuspend.toTypedArray(), true) }
+        runCatching { if (toAllow.isNotEmpty()) dpm.setPackagesSuspended(admin, toAllow, false) }
     }
 }
