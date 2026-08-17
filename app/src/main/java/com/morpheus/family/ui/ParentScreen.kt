@@ -57,6 +57,9 @@ import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.util.Pin
+import com.morpheus.family.util.Totp
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -662,11 +665,155 @@ private fun ChildScheduleEditor(
 
         ChildMonitorCard(child)
 
+        ChildAppLockCard(prefs, child)
+
         ChildLocationCard(prefs, child, onOpenLiveMap = { onOpenLiveMap(child.id) })
 
         AppRulesEditor(prefs, child)
     }
     }
+}
+
+/**
+ * Parent control for the child app-open lock: enable it, read the current
+ * rotating code to give the child, and set a fixed emergency PIN as a fail-safe.
+ */
+@Composable
+private fun ChildAppLockCard(prefs: Prefs, child: ChildRef) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val remoteAvailable = remember { RemoteRepository.available(context) }
+    val policy by prefs.childAppPolicyFlow(child.id).collectAsState(initial = AppPolicy())
+    var showSetPin by remember { mutableStateOf(false) }
+
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(1000)
+        }
+    }
+
+    fun persist(updated: AppPolicy) {
+        scope.launch {
+            prefs.setChildAppPolicy(child.id, updated)
+            RemoteRepository.pushAppPolicy(context, child.id, updated)
+        }
+    }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("🔐 Bloqueio do app do filho", style = MaterialTheme.typography.titleMedium)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Exigir código para abrir",
+                    style = MaterialTheme.typography.bodyLarge,
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(
+                    checked = policy.lockEnabled,
+                    onCheckedChange = { on ->
+                        var p = policy.copy(lockEnabled = on)
+                        if (on && p.lockSecret.isBlank()) p = p.copy(lockSecret = Totp.randomSecretBase64())
+                        persist(p)
+                    },
+                )
+            }
+            if (policy.lockEnabled && policy.lockSecret.isNotBlank()) {
+                val secs = Totp.secondsRemaining(now)
+                Text("Código atual para abrir o app do filho:", style = MaterialTheme.typography.bodySmall)
+                Text(
+                    Totp.code(policy.lockSecret, now).chunked(3).joinToString(" "),
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                LinearProgressIndicator(
+                    progress = { secs / 30f },
+                    modifier = Modifier.fillMaxWidth().height(6.dp),
+                )
+                Text(
+                    "Muda em ${secs}s",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            HorizontalDivider()
+            Text(
+                if (policy.lockFixedPinHash.isBlank()) "PIN fixo de emergência: não definido"
+                else "PIN fixo de emergência: definido ✓",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            OutlinedButton(onClick = { showSetPin = true }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (policy.lockFixedPinHash.isBlank()) "Definir PIN fixo" else "Alterar PIN fixo")
+            }
+            Text(
+                "O código muda a cada 30s e aparece aqui. O PIN fixo é o plano B: memorize-o para " +
+                    "abrir o app do filho caso você fique sem este celular. O ícone continua visível — " +
+                    "isto só impede o filho de abrir o app para mexer nas configurações.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (!remoteAvailable) {
+                Text(
+                    "Sem conexão remota — vale quando o celular do filho sincronizar.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+    }
+
+    if (showSetPin) {
+        SetFixedPinDialog(
+            hasExisting = policy.lockFixedPinHash.isNotBlank(),
+            onDismiss = { showSetPin = false },
+            onClear = { persist(policy.copy(lockFixedPinHash = "")); showSetPin = false },
+            onSet = { pin -> persist(policy.copy(lockFixedPinHash = Pin.hash(pin))); showSetPin = false },
+        )
+    }
+}
+
+@Composable
+private fun SetFixedPinDialog(
+    hasExisting: Boolean,
+    onDismiss: () -> Unit,
+    onClear: () -> Unit,
+    onSet: (String) -> Unit,
+) {
+    var pin by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("PIN fixo de emergência") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Defina um PIN (mín. 4 dígitos). Memorize-o: serve para abrir o app do filho " +
+                        "se você perder o acesso ao código dinâmico.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { pin = it.filter(Char::isDigit).take(8) },
+                    label = { Text("PIN fixo") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = pin.length >= 4, onClick = { onSet(pin) }) { Text("Salvar") }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (hasExisting) TextButton(onClick = onClear) { Text("Remover") }
+                TextButton(onClick = onDismiss) { Text("Cancelar") }
+            }
+        },
+    )
 }
 
 /**

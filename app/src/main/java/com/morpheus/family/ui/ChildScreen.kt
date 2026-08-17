@@ -45,7 +45,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import com.morpheus.family.time.TrustedTimeProvider
+import com.morpheus.family.util.Totp
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -613,3 +618,73 @@ private fun adminIntent(context: Context): Intent =
 private fun batteryIntent(context: Context): Intent =
     Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
         .setData(Uri.parse("package:${context.packageName}"))
+
+/**
+ * App-open lock for the child device: when the parent enables it, opening the app
+ * requires the rotating code (shown on the parent's phone) or the fixed emergency
+ * PIN. The icon stays visible and the managed-device notice stays on — this only
+ * stops the child from opening the app to tamper with it. Unlock lasts for the
+ * current session (re-locks when the app is reopened).
+ */
+@Composable
+fun ChildGate(prefs: Prefs) {
+    val appPolicy by prefs.appPolicyFlow.collectAsState(initial = AppPolicy())
+    var unlocked by rememberSaveable { mutableStateOf(false) }
+    val locked = appPolicy.lockEnabled &&
+        (appPolicy.lockSecret.isNotBlank() || appPolicy.lockFixedPinHash.isNotBlank())
+    if (locked && !unlocked) {
+        ChildLockScreen(appPolicy, onUnlock = { unlocked = true })
+    } else {
+        ChildScreen(prefs)
+    }
+}
+
+@Composable
+private fun ChildLockScreen(policy: AppPolicy, onUnlock: () -> Unit) {
+    val context = LocalContext.current
+    var code by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf(false) }
+
+    Scaffold(containerColor = MaterialTheme.colorScheme.background) { pad ->
+        Column(
+            modifier = Modifier.fillMaxSize().padding(pad).arcadeGrid().padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("🔒", fontSize = 56.sp)
+            Spacer(Modifier.height(12.dp))
+            Text("App protegido", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Peça o código ao responsável para abrir.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(20.dp))
+            OutlinedTextField(
+                value = code,
+                onValueChange = { code = it.filter(Char::isDigit).take(8); error = false },
+                label = { Text("Código") },
+                singleLine = true,
+                isError = error,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+            )
+            if (error) {
+                Spacer(Modifier.height(6.dp))
+                Text("Código incorreto", color = MaterialTheme.colorScheme.error)
+            }
+            Spacer(Modifier.height(20.dp))
+            PixelButton(
+                onClick = {
+                    // Trusted time resists the child moving the device clock.
+                    val now = TrustedTimeProvider.now(context).millis
+                    val ok = Totp.valid(policy.lockSecret, code, now, skewSteps = 2) ||
+                        (policy.lockFixedPinHash.isNotBlank() && Pin.hash(code) == policy.lockFixedPinHash)
+                    if (ok) onUnlock() else { error = true; code = "" }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Entrar") }
+        }
+    }
+}

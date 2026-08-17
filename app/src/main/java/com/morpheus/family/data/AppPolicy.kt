@@ -67,6 +67,13 @@ data class AppPolicy(
     val homeworkUntil: Long = 0L,
     val studyApps: List<String> = emptyList(),
     val geofence: Geofence = Geofence(),
+    // App-open lock on the child device: a rotating TOTP code (parent sees the
+    // current code on their phone) plus a fixed emergency PIN as a fail-safe.
+    // [lockSecret] is app-internal on both devices (never shown to the child);
+    // [lockFixedPinHash] is the hashed emergency PIN.
+    val lockEnabled: Boolean = false,
+    val lockSecret: String = "",
+    val lockFixedPinHash: String = "",
 ) {
     /** Whether [packageName] should be blocked at [nowMillis] by its windows. */
     fun isAppBlockedByWindow(packageName: String, nowMillis: Long): Boolean {
