@@ -23,12 +23,12 @@ val keystoreProps = Properties().apply {
 
 android {
     namespace = "com.morpheus.family"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.morpheus.family"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         // versionCode auto-increments in CI (VERSION_CODE = run_number + offset)
         // so every Play upload is unique and increasing; defaults to 1 locally.
         versionCode = (System.getenv("VERSION_CODE") ?: "1").toInt()
