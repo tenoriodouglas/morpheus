@@ -49,6 +49,10 @@ class Prefs(private val context: Context) {
         // notifications when a block starts/ends (null until first evaluation).
         val LAST_BLOCKED_STATE = booleanPreferencesKey("last_blocked_state")
 
+        // Child side: the allowUntil we last notified about, so an "extra time
+        // granted" notice fires once per grant.
+        val LAST_ALLOW_NOTIFIED = longPreferencesKey("last_allow_notified")
+
         // Child side: rolling 24h location history (JSON), mirrored locally so we
         // never have to read it back from Firestore before appending.
         val LOC_HISTORY = stringPreferencesKey("loc_history")
@@ -127,6 +131,11 @@ class Prefs(private val context: Context) {
     suspend fun lastBlockedState(): Boolean? = context.dataStore.data.first()[Keys.LAST_BLOCKED_STATE]
     suspend fun setLastBlockedState(blocked: Boolean) =
         context.dataStore.edit { it[Keys.LAST_BLOCKED_STATE] = blocked }
+
+    // Child: the allowUntil already announced (so "mais tempo" notifies once).
+    suspend fun lastAllowNotified(): Long = context.dataStore.data.first()[Keys.LAST_ALLOW_NOTIFIED] ?: 0L
+    suspend fun setLastAllowNotified(value: Long) =
+        context.dataStore.edit { it[Keys.LAST_ALLOW_NOTIFIED] = value }
 
     // Child rolling 24h location history (JSON).
     suspend fun locationHistory(): LocationHistory =

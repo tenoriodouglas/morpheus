@@ -4,6 +4,7 @@ import android.content.Context
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.ktx.auth
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.ktx.firestore
@@ -14,6 +15,10 @@ import com.morpheus.family.data.Schedule
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 
@@ -33,6 +38,27 @@ object RemoteRepository {
     fun available(context: Context): Boolean =
         FirebaseApp.getApps(context).isNotEmpty()
 
+    /** Live diagnostics so the UI can show WHY sync is (not) working. */
+    data class SyncStatus(
+        val signedIn: Boolean = false,
+        val lastOkAt: Long = 0L,
+        val lastError: String? = null,
+    )
+
+    private val _status = MutableStateFlow(SyncStatus())
+    val status: StateFlow<SyncStatus> = _status.asStateFlow()
+
+    /** Turn a Firestore/auth failure into a plain, actionable message. */
+    private fun describe(t: Throwable?): String = when {
+        t is FirebaseFirestoreException &&
+            t.code == FirebaseFirestoreException.Code.PERMISSION_DENIED ->
+            "Sem permissão do Firestore — publique as novas regras (firebase deploy --only firestore:rules) e confira o pareamento."
+        t is FirebaseFirestoreException &&
+            t.code == FirebaseFirestoreException.Code.UNAVAILABLE ->
+            "Firestore indisponível — sem internet no momento."
+        else -> t?.message ?: "erro desconhecido"
+    }
+
     /** Background scope for writes that must wait for anonymous sign-in first. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -45,9 +71,24 @@ object RemoteRepository {
      * permission-denied and vanish silently.
      */
     private suspend fun awaitSignIn(): Boolean {
-        Firebase.auth.currentUser?.let { return true }
-        return runCatching { Firebase.auth.signInAnonymously().await() }.isSuccess &&
-            Firebase.auth.currentUser != null
+        Firebase.auth.currentUser?.let {
+            _status.update { s -> s.copy(signedIn = true) }
+            return true
+        }
+        val result = runCatching { Firebase.auth.signInAnonymously().await() }
+        return if (result.isSuccess && Firebase.auth.currentUser != null) {
+            _status.update { it.copy(signedIn = true) }
+            true
+        } else {
+            _status.update {
+                it.copy(
+                    signedIn = false,
+                    lastError = "Login anônimo falhou — ative Authentication → Sign-in method → " +
+                        "Anonymous no Firebase (${result.exceptionOrNull()?.message ?: "sem detalhe"})",
+                )
+            }
+            false
+        }
     }
 
     /** Kick off sign-in early (e.g. from the guardian service) so later calls are instant. */
@@ -60,7 +101,13 @@ object RemoteRepository {
     private fun write(context: Context, pairId: String, data: Map<String, Any>) {
         if (!available(context) || pairId.isBlank()) return
         scope.launch {
-            if (awaitSignIn()) runCatching { doc(pairId).set(data, SetOptions.merge()) }
+            if (awaitSignIn()) {
+                doc(pairId).set(data, SetOptions.merge())
+                    .addOnSuccessListener {
+                        _status.update { it.copy(lastOkAt = System.currentTimeMillis(), lastError = null) }
+                    }
+                    .addOnFailureListener { e -> _status.update { it.copy(lastError = describe(e)) } }
+            }
         }
     }
 
@@ -79,7 +126,9 @@ object RemoteRepository {
         scope.launch {
             if (!awaitSignIn() || cancelled) return@launch
             val reg = doc(pairId).addSnapshotListener { snap, err ->
-                if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+                if (err != null) { _status.update { it.copy(lastError = describe(err)) }; return@addSnapshotListener }
+                if (snap == null || !snap.exists()) return@addSnapshotListener
+                _status.update { it.copy(lastOkAt = System.currentTimeMillis(), lastError = null) }
                 // NB: do NOT skip snapshots with hasPendingWrites here. The child
                 // both writes (status/heartbeat/location) and reads (policy) from
                 // the SAME document, so a parent command arriving while the child

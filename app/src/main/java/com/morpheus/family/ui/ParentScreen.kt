@@ -216,6 +216,8 @@ private fun ParentDashboard(
             }
         }
 
+        SyncStatusCard(remoteAvailable)
+
         if (!remoteAvailable) {
             Card(
                 Modifier.fillMaxWidth(),
@@ -822,6 +824,47 @@ private fun SetFixedPinDialog(
             }
         },
     )
+}
+
+/**
+ * Live connection diagnostics so a broken parent<->child sync is visible instead
+ * of silent: shows the real Firestore/auth error (e.g. rules not published,
+ * anonymous auth disabled) or a healthy "syncing" state.
+ */
+@Composable
+private fun SyncStatusCard(remoteAvailable: Boolean) {
+    if (!remoteAvailable) return
+    val sync by RemoteRepository.status.collectAsState()
+    val recent = sync.lastOkAt > 0 && System.currentTimeMillis() - sync.lastOkAt < 90_000
+
+    val err = sync.lastError
+    val (emoji, text) = when {
+        err != null -> "⚠️" to err
+        !sync.signedIn -> "…" to "Conectando ao Firebase…"
+        recent -> "🟢" to "Sincronizando com a nuvem"
+        else -> "🟡" to "Conectado — aguardando dados do filho"
+    }
+    val container = if (err != null) MaterialTheme.colorScheme.errorContainer
+    else MaterialTheme.colorScheme.surfaceVariant
+    val onContainer = if (err != null) MaterialTheme.colorScheme.onErrorContainer
+    else MaterialTheme.colorScheme.onSurfaceVariant
+
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = container, contentColor = onContainer),
+    ) {
+        Row(
+            Modifier.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(emoji, style = MaterialTheme.typography.titleLarge)
+            Column {
+                Text("Conexão pai ↔ filho", style = MaterialTheme.typography.titleSmall)
+                Text(text, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
 }
 
 /** A grouping header that separates the child-control screen into subjects. */

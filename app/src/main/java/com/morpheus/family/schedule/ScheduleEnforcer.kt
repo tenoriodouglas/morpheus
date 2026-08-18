@@ -122,13 +122,24 @@ object ScheduleEnforcer {
             runBlocking { prefs.setLastBlockedState(blocked) }
             if (prev != null) {
                 if (blocked) {
-                    ChildNotifications.postTransition(context, "🔒 Uso pausado", text)
+                    val title = if (reason == "manual") "🔒 O responsável pausou a internet" else "🔒 Uso pausado"
+                    ChildNotifications.postTransition(context, title, text)
                 } else {
                     ChildNotifications.postTransition(
-                        context, "✅ Liberado", "A internet foi liberada.",
+                        context, "✅ Liberado", "A internet foi liberada pelo responsável.",
                     )
                 }
             }
+        }
+
+        // Extra-time grant: notify once per new allowUntil the parent sets.
+        val lastAllow = runBlocking { prefs.lastAllowNotified() }
+        if (schedule.allowUntil > nowMillis && schedule.allowUntil > lastAllow) {
+            runBlocking { prefs.setLastAllowNotified(schedule.allowUntil) }
+            ChildNotifications.postTransition(
+                context, "⏰ Mais tempo!",
+                "O responsável liberou mais tempo até ${hhmm(schedule.allowUntil)}.",
+            )
         }
     }
 
