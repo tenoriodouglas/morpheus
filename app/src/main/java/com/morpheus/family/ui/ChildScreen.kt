@@ -244,6 +244,9 @@ fun ChildScreen(prefs: Prefs) {
                     CallButton("📞 Ligar pro responsável", Modifier.fillMaxWidth()) {
                         com.morpheus.family.call.CallManager.startCall(context)
                     }
+                    CallButton("📹 Vídeo com o responsável", Modifier.fillMaxWidth(), video = true) {
+                        com.morpheus.family.call.CallManager.startCall(context, video = true)
+                    }
                 }
                 PairingCard(pairId)
                 if (optional.any { it.done != true }) {

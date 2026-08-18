@@ -693,6 +693,9 @@ private fun ChildScheduleEditor(
             CallButton("📞 Ligar para ${child.name}", Modifier.fillMaxWidth()) {
                 com.morpheus.family.call.CallManager.startCall(context)
             }
+            CallButton("📹 Vídeo com ${child.name}", Modifier.fillMaxWidth(), video = true) {
+                com.morpheus.family.call.CallManager.startCall(context, video = true)
+            }
         }
 
         // ---- 👀 O que está acontecendo agora ----

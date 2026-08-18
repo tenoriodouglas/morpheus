@@ -16,9 +16,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.webrtc.EglBase
 import org.webrtc.IceCandidate
 import org.webrtc.PeerConnection
 import org.webrtc.SessionDescription
+import org.webrtc.VideoTrack
 
 /**
  * Parent <-> child audio call, app-global. Signaling (offer/answer/ICE) rides
@@ -37,10 +39,22 @@ object CallManager {
         val state: State = State.IDLE,
         val peer: String = "",
         val muted: Boolean = false,
+        val video: Boolean = false,
+        val cameraOn: Boolean = true,
     )
 
     private val _ui = MutableStateFlow(CallUi())
     val ui: StateFlow<CallUi> = _ui.asStateFlow()
+
+    /** Video tracks + shared GL context for the call UI to render (video calls). */
+    data class VideoUi(
+        val eglBase: EglBase? = null,
+        val local: VideoTrack? = null,
+        val remote: VideoTrack? = null,
+    )
+
+    private val _video = MutableStateFlow(VideoUi())
+    val video: StateFlow<VideoUi> = _video.asStateFlow()
 
     private var appContext: Context? = null
     private var pairId: String = ""
@@ -58,6 +72,7 @@ object CallManager {
     private var remoteReady = false
     private var handledCallAt = 0L
     private var pendingOffer: String? = null
+    private var pendingVideo = false
     private var offerIceConsumed = 0
     private var answerIceConsumed = 0
 
@@ -117,7 +132,8 @@ object CallManager {
         if (_ui.value.state == State.IDLE && from != role && status == "ringing" && fresh && callAt > handledCallAt) {
             handledCallAt = callAt
             pendingOffer = snap.getString("callOffer")
-            _ui.value = CallUi(State.INCOMING, peerName)
+            pendingVideo = snap.getBoolean("callVideo") ?: false
+            _ui.value = CallUi(State.INCOMING, peerName, video = pendingVideo)
             return
         }
 
@@ -155,21 +171,26 @@ object CallManager {
         return i
     }
 
-    /** Place a call to the peer. */
-    fun startCall(context: Context) {
+    /** Place a call to the peer. Pass [video] = true for a video call. */
+    fun startCall(context: Context, video: Boolean = false) {
         if (_ui.value.state != State.IDLE || pairId.isBlank()) return
         iAmCaller = true
         remoteReady = false
         answerIceConsumed = 0
         offerIceConsumed = 0
-        _ui.value = CallUi(State.OUTGOING, peerName)
+        _ui.value = CallUi(State.OUTGOING, peerName, video = video)
         client = WebRtcClient(
             context.applicationContext,
             onLocalIce = { c -> appendIce("callOfferIce", c) },
             onConnected = { _ui.value = _ui.value.copy(state = State.ACTIVE) },
             onClosed = { endLocal(writeEnded = true) },
             extraIceServers = turnServers,
+            videoEnabled = video,
+            onRemoteVideo = { track -> _video.value = _video.value.copy(remote = track) },
         )
+        if (video) {
+            _video.value = VideoUi(client?.eglBase, client?.localVideoTrack, null)
+        }
         val now = System.currentTimeMillis()
         handledCallAt = now
         client?.createOffer { sdp ->
@@ -178,6 +199,7 @@ object CallManager {
                     "callFrom" to role,
                     "callAt" to now,
                     "callStatus" to "ringing",
+                    "callVideo" to video,
                     "callOffer" to sdp.description,
                     "callAnswer" to "",
                     "callOfferIce" to emptyList<Any>(),
@@ -194,16 +216,22 @@ object CallManager {
         val offer = pendingOffer ?: return endLocal(writeEnded = true)
         iAmCaller = false
         offerIceConsumed = 0
+        val video = pendingVideo
         client = WebRtcClient(
             context.applicationContext,
             onLocalIce = { c -> appendIce("callAnswerIce", c) },
             onConnected = { _ui.value = _ui.value.copy(state = State.ACTIVE) },
             onClosed = { endLocal(writeEnded = true) },
             extraIceServers = turnServers,
+            videoEnabled = video,
+            onRemoteVideo = { track -> _video.value = _video.value.copy(remote = track) },
         )
+        if (video) {
+            _video.value = VideoUi(client?.eglBase, client?.localVideoTrack, null)
+        }
         client?.setRemoteDescription(SessionDescription(SessionDescription.Type.OFFER, offer))
         remoteReady = true
-        _ui.value = CallUi(State.ACTIVE, peerName)
+        _ui.value = CallUi(State.ACTIVE, peerName, video = video)
         client?.createAnswer { sdp ->
             doc().set(
                 mapOf("callAnswer" to sdp.description, "callStatus" to "active"),
@@ -216,6 +244,18 @@ object CallManager {
         val m = !_ui.value.muted
         client?.setMuted(m)
         _ui.value = _ui.value.copy(muted = m)
+    }
+
+    /** Video call: turn the local camera on/off. */
+    fun toggleCamera() {
+        val on = !_ui.value.cameraOn
+        client?.setCameraEnabled(on)
+        _ui.value = _ui.value.copy(cameraOn = on)
+    }
+
+    /** Video call: flip between front and back camera. */
+    fun switchCamera() {
+        client?.switchCamera()
     }
 
     /** Hang up / decline. */
@@ -241,6 +281,8 @@ object CallManager {
         iAmCaller = false
         remoteReady = false
         pendingOffer = null
+        pendingVideo = false
+        _video.value = VideoUi()
         _ui.value = CallUi(State.IDLE, peerName)
     }
 
