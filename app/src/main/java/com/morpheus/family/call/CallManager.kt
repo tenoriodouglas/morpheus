@@ -12,6 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -276,14 +277,22 @@ object CallManager {
         if (writeEnded && pairId.isNotBlank()) {
             runCatching { doc().set(mapOf("callStatus" to "ended"), SetOptions.merge()) }
         }
-        runCatching { client?.close() }
+        val toClose = client
         client = null
         iAmCaller = false
         remoteReady = false
         pendingOffer = null
         pendingVideo = false
+        // Clear the UI FIRST so Compose detaches and releases the SurfaceViewRenderers
+        // (they render into the client's EglBase). Only THEN — a frame later — tear
+        // down the peer connection, tracks and EglBase. Releasing the GL context while
+        // a renderer still holds it crashed both apps at the end of a video call.
         _video.value = VideoUi()
         _ui.value = CallUi(State.IDLE, peerName)
+        scope.launch {
+            delay(250)
+            runCatching { toClose?.close() }
+        }
     }
 
     private fun unbindListenerOnly() {

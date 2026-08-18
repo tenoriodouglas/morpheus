@@ -66,6 +66,7 @@ import com.morpheus.family.data.Geofence
 import com.morpheus.family.data.KnownApps
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
+import com.morpheus.family.notify.ParentNotifications
 import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.util.Pin
 import com.morpheus.family.util.Totp
@@ -100,22 +101,61 @@ fun ParentScreen(prefs: Prefs) {
 
 @Composable
 private fun ParentHome(prefs: Prefs) {
-    var selectedChildId by remember { mutableStateOf<String?>(null) }
-    var liveMapChildId by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
     val children by prefs.childrenFlow.collectAsState(initial = emptyList())
+    var currentChildId by remember { mutableStateOf<String?>(null) }
+    var liveMapChildId by remember { mutableStateOf<String?>(null) }
+    var showMenu by remember { mutableStateOf(false) }
+
+    // Always-on safety net: whatever screen is showing (including the child panel),
+    // a new SOS/alert or request from ANY child raises a system notification — the
+    // in-app banners themselves live in the family menu (dashboard).
+    val remoteAvailable = remember { RemoteRepository.available(context) }
+    val seenAlert = remember { mutableMapOf<String, Long>() }
+    val seenReq = remember { mutableMapOf<String, Long>() }
+    DisposableEffect(children, remoteAvailable) {
+        val regs = mutableListOf<ListenerRegistration>()
+        if (remoteAvailable) {
+            children.forEach { child ->
+                RemoteRepository.listenAlert(context, child.id) { type, at ->
+                    if (at > (seenAlert[child.id] ?: 0L)) {
+                        seenAlert[child.id] = at
+                        ParentNotifications.postAlert(
+                            context, child.name,
+                            if (type == "sos") "🆘 SOS — pedido de ajuda!" else "Evento de segurança no aparelho",
+                        )
+                    }
+                }?.let { regs.add(it) }
+                RemoteRepository.listenRequest(context, child.id) { _, note, at ->
+                    if (at > (seenReq[child.id] ?: 0L)) {
+                        seenReq[child.id] = at
+                        ParentNotifications.postRequest(context, child.name, note.ifBlank { "Pediu mais tempo" })
+                    }
+                }?.let { regs.add(it) }
+            }
+        }
+        onDispose { regs.forEach { it.remove() } }
+    }
 
     val liveMapChild = children.firstOrNull { it.id == liveMapChildId }
-    val selected = children.firstOrNull { it.id == selectedChildId }
+    // Home defaults to the first child (control panel); explicit selection wins.
+    val current = children.firstOrNull { it.id == currentChildId } ?: children.firstOrNull()
     when {
         liveMapChild != null ->
             ChildLiveMapScreen(prefs, liveMapChild, onBack = { liveMapChildId = null })
-        selected != null ->
+        // No child yet, or the user opened the family menu: show the dashboard.
+        current == null || showMenu ->
+            ParentDashboard(
+                prefs, children,
+                onOpenChild = { currentChildId = it; showMenu = false },
+                onBack = if (children.isEmpty()) null else ({ showMenu = false }),
+            )
+        else ->
             ChildScheduleEditor(
-                prefs, selected,
-                onBack = { selectedChildId = null },
+                prefs, current,
+                onOpenMenu = { showMenu = true },
                 onOpenLiveMap = { liveMapChildId = it },
             )
-        else -> ParentDashboard(prefs, children, onOpenChild = { selectedChildId = it })
     }
 }
 
@@ -152,7 +192,10 @@ private fun ParentDashboard(
     prefs: Prefs,
     children: List<ChildRef>,
     onOpenChild: (String) -> Unit,
+    onBack: (() -> Unit)? = null,
 ) {
+    // When opened as the family menu from a child's panel, back returns there.
+    if (onBack != null) BackHandler(onBack = onBack)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val remoteAvailable = remember { RemoteRepository.available(context) }
@@ -229,6 +272,9 @@ private fun ParentDashboard(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        if (onBack != null) {
+            TextButton(onClick = onBack) { Text("← Voltar ao controle") }
+        }
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -638,12 +684,11 @@ private fun blockForOneHour(s: Schedule): Schedule = s.copy(
 private fun ChildScheduleEditor(
     prefs: Prefs,
     child: ChildRef,
-    onBack: () -> Unit,
+    onOpenMenu: () -> Unit,
     onOpenLiveMap: (String) -> Unit,
 ) {
-    // Back gesture / button returns to the children dashboard instead of exiting.
-    BackHandler(onBack = onBack)
-
+    // This is the parent's home screen, so the system back gesture exits the app
+    // as usual; the family menu (add/switch child, avisos) is reached via a button.
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val remoteAvailable = remember { RemoteRepository.available(context) }
@@ -685,7 +730,7 @@ private fun ChildScheduleEditor(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        TextButton(onClick = onBack) { Text("← Voltar aos filhos") }
+        TextButton(onClick = onOpenMenu) { Text("☰ Família e ajustes") }
         Text("Controle de ${child.name}", style = MaterialTheme.typography.headlineMedium)
         Text("Código: ${child.id}", style = MaterialTheme.typography.bodySmall)
 
