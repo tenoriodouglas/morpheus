@@ -87,6 +87,27 @@ class Prefs(private val context: Context) {
     suspend fun setPairedId(id: String) =
         context.dataStore.edit { it[Keys.PAIRED_ID] = id }
 
+    /**
+     * Return this child's stable pairing code, generating one exactly once if it
+     * has never been set. The read-or-create happens inside a single DataStore
+     * [edit] transaction, so it cannot race with the pairedIdFlow still loading
+     * (which previously regenerated a new code on every app launch and broke the
+     * pairing). Never overwrites an existing code.
+     */
+    suspend fun ensurePairedId(): String {
+        var result = ""
+        context.dataStore.edit { prefs ->
+            val existing = prefs[Keys.PAIRED_ID]
+            result = if (!existing.isNullOrBlank()) {
+                existing
+            } else {
+                java.util.UUID.randomUUID().toString().take(8).uppercase()
+                    .also { prefs[Keys.PAIRED_ID] = it }
+            }
+        }
+        return result
+    }
+
     suspend fun setSchedule(schedule: Schedule) =
         context.dataStore.edit { it[Keys.SCHEDULE] = encodeSchedule(schedule) }
 

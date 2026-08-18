@@ -73,7 +73,6 @@ import com.morpheus.family.remote.RemoteRepository
 import com.morpheus.family.service.GuardianService
 import com.morpheus.family.util.Pin
 import kotlinx.coroutines.launch
-import java.util.UUID
 
 private data class SetupStep(
     val emoji: String,
@@ -104,12 +103,17 @@ fun ChildScreen(prefs: Prefs) {
     var showLocationDisclosure by remember { mutableStateOf(false) }
     var showBackgroundDisclosure by remember { mutableStateOf(false) }
 
+    // Generate the pairing code exactly once, atomically. Keyed on Unit (not the
+    // pairId flow) so it never fires with the flow's transient `null` initial and
+    // regenerates a fresh code on every launch — that race was breaking pairing.
+    LaunchedEffect(Unit) {
+        prefs.ensurePairedId()
+    }
     LaunchedEffect(pairId) {
-        if (pairId.isNullOrBlank()) {
-            prefs.setPairedId(UUID.randomUUID().toString().take(8).uppercase())
-        } else {
+        val id = pairId
+        if (!id.isNullOrBlank()) {
             GuardianService.start(context)
-            com.morpheus.family.call.CallManager.bind(context, pairId!!, "child", "Responsável")
+            com.morpheus.family.call.CallManager.bind(context, id, "child", "Responsável")
         }
     }
 
