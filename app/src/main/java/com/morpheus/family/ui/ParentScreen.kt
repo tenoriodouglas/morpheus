@@ -596,6 +596,11 @@ private fun ChildScheduleEditor(
 
     val snackbar = remember { SnackbarHostState() }
 
+    // Bind the call channel to this child so we can call / receive from them.
+    LaunchedEffect(child.id) {
+        com.morpheus.family.call.CallManager.bind(context, child.id, "parent", child.name)
+    }
+
     fun persist(newSchedule: Schedule, toast: String? = null) {
         scope.launch {
             prefs.setChildSchedule(child.id, newSchedule)
@@ -625,6 +630,12 @@ private fun ChildScheduleEditor(
         TextButton(onClick = onBack) { Text("← Voltar aos filhos") }
         Text("Controle de ${child.name}", style = MaterialTheme.typography.headlineMedium)
         Text("Código: ${child.id}", style = MaterialTheme.typography.bodySmall)
+
+        if (remoteAvailable) {
+            CallButton("📞 Ligar para ${child.name}", Modifier.fillMaxWidth()) {
+                com.morpheus.family.call.CallManager.startCall(context)
+            }
+        }
 
         // ---- 👀 O que está acontecendo agora ----
         SectionHeader("👀 Agora")

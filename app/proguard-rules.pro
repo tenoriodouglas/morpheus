@@ -15,3 +15,6 @@
 # osmdroid (map) loads tile sources/overlays reflectively.
 -keep class org.osmdroid.** { *; }
 -dontwarn org.osmdroid.**
+
+# WebRTC (audio calls) — keep JNI-bound classes from being stripped/renamed.
+-keep class org.webrtc.** { *; }

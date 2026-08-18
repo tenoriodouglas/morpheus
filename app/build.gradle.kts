@@ -135,6 +135,9 @@ dependencies {
     // Keyless map (OpenStreetMap) for the live location + 24h route view.
     implementation("org.osmdroid:osmdroid-android:6.1.20")
 
+    // WebRTC (audio calls parent <-> child; signaling over Firestore).
+    implementation("io.getstream:stream-webrtc-android:1.3.8")
+
     // Location (child location for the parent, geofence, SOS).
     implementation("com.google.android.gms:play-services-location:21.3.0")
     // await() bridge for Play Services Tasks.

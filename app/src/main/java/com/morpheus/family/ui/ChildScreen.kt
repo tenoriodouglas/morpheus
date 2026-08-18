@@ -109,6 +109,7 @@ fun ChildScreen(prefs: Prefs) {
             prefs.setPairedId(UUID.randomUUID().toString().take(8).uppercase())
         } else {
             GuardianService.start(context)
+            com.morpheus.family.call.CallManager.bind(context, pairId!!, "child", "Responsável")
         }
     }
 
@@ -235,6 +236,11 @@ fun ChildScreen(prefs: Prefs) {
                         }
                     },
                 )
+                if (!id.isNullOrBlank() && remoteReady) {
+                    CallButton("📞 Ligar pro responsável", Modifier.fillMaxWidth()) {
+                        com.morpheus.family.call.CallManager.startCall(context)
+                    }
+                }
                 PairingCard(pairId)
                 if (optional.any { it.done != true }) {
                     Text("Extras (se quiser) ✨", style = MaterialTheme.typography.titleMedium)

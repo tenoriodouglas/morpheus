@@ -66,6 +66,9 @@ class MainActivity : ComponentActivity() {
                             AppMode.CHILD -> ChildGate(prefs)
                             AppMode.PARENT -> ParentScreen(prefs)
                         }
+
+                        // Full-screen call overlay, above whatever screen is shown.
+                        CallHost()
                     }
                 }
             }
