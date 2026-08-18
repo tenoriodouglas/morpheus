@@ -83,13 +83,12 @@ object LocationReporter {
             ).await()
         }.getOrNull() ?: runCatching { client.lastLocation.await() }.getOrNull() ?: return
 
-        // Fake-GPS guard: don't upload a mocked position; warn the parent instead
-        // and keep the last real location on the map.
-        if (isMock(location)) {
-            alertMock(context, pairId, nowMillis)
-            return
-        }
-        recordAndUpload(context, pairId, location.latitude, location.longitude, nowMillis)
+        // Fake-GPS guard: warn the parent when a fix looks mocked, but STILL upload
+        // it (flagged) — many real devices and every emulator mark all fixes as
+        // mock, so dropping them would break location entirely.
+        val mock = isMock(location)
+        if (mock) alertMock(context, pairId, nowMillis)
+        recordAndUpload(context, pairId, location.latitude, location.longitude, nowMillis, mock)
         evaluateGeofence(context, pairId, geofence, location, nowMillis)
     }
 
@@ -108,6 +107,7 @@ object LocationReporter {
         lat: Double,
         lng: Double,
         at: Long,
+        mock: Boolean = false,
     ) {
         // Serialize the append and decide, under the lock, whether this fix also
         // grows the route — otherwise two concurrent callers both read the old
@@ -120,7 +120,7 @@ object LocationReporter {
             prefs.setLocationHistory(history)
             LocationHistory.encode(history)
         }
-        RemoteRepository.reportLocation(context, pairId, lat, lng, at, historyJson, at)
+        RemoteRepository.reportLocation(context, pairId, lat, lng, at, historyJson, at, mock)
     }
 
     private val routeMutex = Mutex()
@@ -164,9 +164,10 @@ object LocationReporter {
                 val loc = result.lastLocation ?: return
                 val n = System.currentTimeMillis()
                 if (n > liveUntil) { stopLive(app); return }
-                if (isMock(loc)) { alertMock(app, pairId, n); return }
+                val mock = isMock(loc)
+                if (mock) alertMock(app, pairId, n)
                 scope.launch {
-                    recordAndUpload(app, pairId, loc.latitude, loc.longitude, n)
+                    recordAndUpload(app, pairId, loc.latitude, loc.longitude, n, mock)
                     evaluateGeofence(app, pairId, geofence, loc, n)
                 }
             }

@@ -45,7 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.morpheus.family.ui.theme.BombNavy
 import com.morpheus.family.ui.theme.BombYellow
-import com.morpheus.family.ui.theme.PressStart2P
+import com.morpheus.family.ui.theme.BungeeFamily
 
 /**
  * Shared "Bomberman-style" arcade widgets: hard-shadow beveled blocks, chunky
@@ -171,7 +171,7 @@ fun PixelTitle(
         Text(
             text,
             color = shadow,
-            fontFamily = PressStart2P,
+            fontFamily = BungeeFamily,
             fontWeight = FontWeight.Normal,
             fontSize = fontSize,
             textAlign = textAlign,
@@ -180,7 +180,7 @@ fun PixelTitle(
         Text(
             text,
             color = color,
-            fontFamily = PressStart2P,
+            fontFamily = BungeeFamily,
             fontWeight = FontWeight.Normal,
             fontSize = fontSize,
             textAlign = textAlign,

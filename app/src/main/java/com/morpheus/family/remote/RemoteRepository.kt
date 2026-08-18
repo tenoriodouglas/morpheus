@@ -227,8 +227,9 @@ object RemoteRepository {
         at: Long,
         historyJson: String? = null,
         historyAt: Long = at,
+        mock: Boolean = false,
     ) {
-        val data = mutableMapOf<String, Any>("lat" to lat, "lng" to lng, "locAt" to at)
+        val data = mutableMapOf<String, Any>("lat" to lat, "lng" to lng, "locAt" to at, "locMock" to mock)
         if (historyJson != null) {
             data["locHistoryJson"] = historyJson
             data["locHistoryAt"] = historyAt
