@@ -624,7 +624,12 @@ private fun ChildScheduleEditor(
         Text("Controle de ${child.name}", style = MaterialTheme.typography.headlineMedium)
         Text("Código: ${child.id}", style = MaterialTheme.typography.bodySmall)
 
-        // 🌐 Internet — block everything or just specific apps, right now.
+        // ---- 👀 O que está acontecendo agora ----
+        SectionHeader("👀 Agora")
+        ChildMonitorCard(child)
+
+        // ---- 🌐 Internet e apps ----
+        SectionHeader("🌐 Internet e apps")
         InternetControlCard(
             prefs = prefs,
             child = child,
@@ -632,17 +637,16 @@ private fun ChildScheduleEditor(
             remoteAvailable = remoteAvailable,
             onApply = { sched, msg -> persist(sched, msg) },
         )
-
-        // 🗓️ Scheduled actions — the recurring block window.
+        // 🗓️ Recurring block window.
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("🗓️ Ações agendadas", style = MaterialTheme.typography.titleMedium)
+                Text("🗓️ Bloqueio por horário", style = MaterialTheme.typography.titleMedium)
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Bloqueio por horário", style = MaterialTheme.typography.bodyLarge)
+                    Text("Ligar bloqueio por horário", style = MaterialTheme.typography.bodyLarge)
                     Switch(
                         checked = current.enabled,
                         onCheckedChange = {
@@ -665,14 +669,15 @@ private fun ChildScheduleEditor(
                 )
             }
         }
+        AppRulesEditor(prefs, child)
 
-        ChildMonitorCard(child)
-
-        ChildAppLockCard(prefs, child)
-
+        // ---- 📍 Localização ----
+        SectionHeader("📍 Localização")
         ChildLocationCard(prefs, child, onOpenLiveMap = { onOpenLiveMap(child.id) })
 
-        AppRulesEditor(prefs, child)
+        // ---- 🔒 Segurança do app ----
+        SectionHeader("🔒 Segurança do app")
+        ChildAppLockCard(prefs, child)
     }
     }
 }
@@ -816,6 +821,17 @@ private fun SetFixedPinDialog(
                 TextButton(onClick = onDismiss) { Text("Cancelar") }
             }
         },
+    )
+}
+
+/** A grouping header that separates the child-control screen into subjects. */
+@Composable
+private fun SectionHeader(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 6.dp),
     )
 }
 

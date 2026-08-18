@@ -7,28 +7,20 @@ service cloud.firestore {
 
     // One document per child, keyed by the child's pairing code.
     //
-    // Access model: authenticated (Anonymous Auth) + trust-on-first-use
-    // membership. The first two devices that touch the document — the child and
-    // the parent who scanned/typed the pairing code — claim membership by adding
-    // their uid to `members`. Once two members exist, no one else can read or
-    // write, even if they learn the pairing code. Enable Authentication >
-    // Sign-in method > Anonymous in the Firebase console.
+    // Access model: any signed-in (Anonymous Auth) device that knows the child's
+    // pairing code may read/write that child's document. The pairing code (shown
+    // as a QR + 8-char code on the child, scanned/typed on the parent) is the
+    // shared secret.
+    //
+    // NOTE: we deliberately do NOT tie access to the anonymous uid. Anonymous uids
+    // change whenever the app is reinstalled or its data is cleared, so a
+    // uid-based "membership" model permanently locks a device out of its own
+    // family document after a reinstall — which broke live status, SOS, extra-time
+    // and remote blocking. Gating on "authenticated + knows the pairing code"
+    // keeps it simple and robust. Enable Authentication > Sign-in method >
+    // Anonymous in the Firebase console.
     match /families/{childId} {
-      function members() {
-        return ('members' in resource.data) ? resource.data.members : [];
-      }
-      function isMember() {
-        return request.auth != null && request.auth.uid in members();
-      }
-      function bootstrapping() {
-        // No members yet, or still room for the second (parent+child) device.
-        return members().size() < 2;
-      }
-
-      allow create: if request.auth != null;
-      allow read:   if isMember() || (request.auth != null && members().size() == 0);
-      allow update: if isMember() || (request.auth != null && bootstrapping());
-      allow delete: if false;
+      allow read, write: if request.auth != null;
     }
 
     // Everything else is denied by default.
@@ -37,7 +29,3 @@ service cloud.firestore {
     }
   }
 }
-
-// Note: this TOFU model caps a family at two devices (one child + one parent).
-// To support multiple parents, raise the bootstrap size and have an existing
-// member add the new uid.

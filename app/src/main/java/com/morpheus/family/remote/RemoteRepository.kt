@@ -80,11 +80,11 @@ object RemoteRepository {
             if (!awaitSignIn() || cancelled) return@launch
             val reg = doc(pairId).addSnapshotListener { snap, err ->
                 if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
-                // Skip the optimistic local echo of our own un-acked writes: the
-                // server-confirmed snapshot (hasPendingWrites == false) follows and
-                // carries the same data. This stops the child re-applying policy on
-                // every heartbeat/status write it makes to the same document.
-                if (snap.metadata.hasPendingWrites()) return@addSnapshotListener
+                // NB: do NOT skip snapshots with hasPendingWrites here. The child
+                // both writes (status/heartbeat/location) and reads (policy) from
+                // the SAME document, so a parent command arriving while the child
+                // has an in-flight write would be dropped/delayed. Echo suppression
+                // is handled downstream (GuardianService's lastEnforced diff-cache).
                 onSnapshot(snap)
             }
             if (cancelled) reg.remove() else inner = reg
@@ -114,6 +114,21 @@ object RemoteRepository {
     /** Child: heartbeat so the parent can see the device is online. */
     fun reportHeartbeat(context: Context, pairId: String, at: Long) {
         write(context, pairId, mapOf("lastSeen" to at))
+    }
+
+    /** Child: publish this device's FCM token so a backend can push wake-ups. */
+    fun reportFcmToken(context: Context, pairId: String, token: String) {
+        if (token.isBlank()) return
+        write(context, pairId, mapOf("childFcmToken" to token))
+    }
+
+    /** Child: fetch the current FCM token and publish it (best-effort). */
+    fun uploadCurrentFcmToken(context: Context, pairId: String) {
+        if (!available(context) || pairId.isBlank()) return
+        runCatching {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().token
+                .addOnSuccessListener { token -> reportFcmToken(context, pairId, token) }
+        }
     }
 
     /** Parent: observe the child's last-seen heartbeat. */

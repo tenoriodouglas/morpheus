@@ -1,0 +1,11 @@
+{
+  "name": "morpheus-functions",
+  "description": "Optional wake-up push for Morpheus (immediate block through Doze).",
+  "engines": { "node": "20" },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^12.6.0",
+    "firebase-functions": "^6.1.0"
+  },
+  "private": true
+}

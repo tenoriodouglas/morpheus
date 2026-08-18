@@ -184,6 +184,8 @@ object ScheduleEnforcer {
         // Claim membership (security) and report a heartbeat (online status).
         RemoteRepository.joinMembership(context, pairId)
         RemoteRepository.reportHeartbeat(context, pairId, now)
+        // Keep the FCM token fresh so the optional wake-up push can reach us.
+        RemoteRepository.uploadCurrentFcmToken(context, pairId)
 
         LocationReporter.reportOnce(context, pairId, appPolicy.geofence, now)
 

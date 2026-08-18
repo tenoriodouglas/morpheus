@@ -2,6 +2,7 @@ package com.morpheus.family.remote
 
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import com.morpheus.family.data.AppMode
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.schedule.ScheduleEnforcer
 import kotlinx.coroutines.runBlocking
@@ -34,7 +35,14 @@ class MorpheusMessagingService : FirebaseMessagingService() {
     }
 
     override fun onNewToken(token: String) {
-        // The child's token can be registered for direct pushes if a backend
-        // is added later; not required for Firestore real-time sync.
+        // Publish the child's token so the optional Cloud Function can push a
+        // high-priority wake-up (immediate block) that punches through Doze.
+        runBlocking {
+            val prefs = Prefs(applicationContext)
+            if (prefs.mode() == AppMode.CHILD) {
+                val pairId = prefs.pairedId() ?: return@runBlocking
+                RemoteRepository.reportFcmToken(applicationContext, pairId, token)
+            }
+        }
     }
 }
