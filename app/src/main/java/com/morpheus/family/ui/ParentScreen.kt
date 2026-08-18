@@ -45,11 +45,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import com.google.firebase.firestore.ListenerRegistration
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -151,6 +156,24 @@ private fun ParentDashboard(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val remoteAvailable = remember { RemoteRepository.available(context) }
+
+    // Receive SOS/request pushes even when the parent app is closed: ask for
+    // notification permission (Android 13+) and publish this device's FCM token
+    // onto every paired child's doc so the backend can reach it.
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {}
+    LaunchedEffect(children, remoteAvailable) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (remoteAvailable && children.isNotEmpty()) {
+            RemoteRepository.uploadParentFcmToken(context, children.associate { it.id to it.name })
+        }
+    }
 
     var codeInput by remember { mutableStateOf("") }
     var nameInput by remember { mutableStateOf("") }

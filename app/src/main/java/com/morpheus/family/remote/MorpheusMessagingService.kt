@@ -4,6 +4,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.morpheus.family.data.AppMode
 import com.morpheus.family.data.Prefs
+import com.morpheus.family.notify.ParentNotifications
 import com.morpheus.family.schedule.ScheduleEnforcer
 import kotlinx.coroutines.runBlocking
 
@@ -15,6 +16,28 @@ import kotlinx.coroutines.runBlocking
 class MorpheusMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
+        // Parent-bound alert (SOS / request) from the Cloud Function: show it as a
+        // dismissible system notification even if the parent app is closed.
+        when (message.data["notifyType"]) {
+            "alert" -> {
+                ParentNotifications.postAlert(
+                    applicationContext,
+                    message.data["childName"] ?: "",
+                    message.data["text"] ?: "🆘 Pedido de ajuda!",
+                )
+                return
+            }
+            "request" -> {
+                ParentNotifications.postRequest(
+                    applicationContext,
+                    message.data["childName"] ?: "",
+                    message.data["text"] ?: "Pediu mais tempo",
+                )
+                return
+            }
+        }
+
+        // Otherwise it's a child wake-up (immediate block/unblock).
         val block = message.data["manualBlockUntil"]?.toLongOrNull()
         val unblock = message.data["manualUnblockUntil"]?.toLongOrNull()
         val setAt = message.data["manualSetAt"]?.toLongOrNull()
@@ -35,13 +58,23 @@ class MorpheusMessagingService : FirebaseMessagingService() {
     }
 
     override fun onNewToken(token: String) {
-        // Publish the child's token so the optional Cloud Function can push a
-        // high-priority wake-up (immediate block) that punches through Doze.
+        // Publish the token so the optional Cloud Function can push high-priority
+        // messages: to the child (immediate block/unblock through Doze), or back
+        // to the parent (SOS/request alerts while its app is closed).
         runBlocking {
             val prefs = Prefs(applicationContext)
-            if (prefs.mode() == AppMode.CHILD) {
-                val pairId = prefs.pairedId() ?: return@runBlocking
-                RemoteRepository.reportFcmToken(applicationContext, pairId, token)
+            when (prefs.mode()) {
+                AppMode.CHILD -> {
+                    val pairId = prefs.pairedId() ?: return@runBlocking
+                    RemoteRepository.reportFcmToken(applicationContext, pairId, token)
+                }
+                AppMode.PARENT -> {
+                    RemoteRepository.uploadParentFcmToken(
+                        applicationContext,
+                        prefs.children().associate { it.id to it.name },
+                    )
+                }
+                else -> {}
             }
         }
     }

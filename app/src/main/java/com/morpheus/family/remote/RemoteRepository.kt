@@ -189,6 +189,28 @@ object RemoteRepository {
         }
     }
 
+    /** Parent: publish this device's FCM token (and the child's display name)
+     *  onto a child's doc so the backend can push SOS/request alerts back to the
+     *  parent — labelled with the child's name — even when its app is closed. */
+    fun reportParentFcmToken(context: Context, pairId: String, token: String, childName: String) {
+        if (token.isBlank()) return
+        val data = mutableMapOf<String, Any>("parentFcmToken" to token)
+        if (childName.isNotBlank()) data["childName"] = childName
+        write(context, pairId, data)
+    }
+
+    /** Parent: publish the current FCM token onto every paired child's doc.
+     *  [children] maps each child's pairing id to its display name. */
+    fun uploadParentFcmToken(context: Context, children: Map<String, String>) {
+        if (!available(context) || children.isEmpty()) return
+        runCatching {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().token
+                .addOnSuccessListener { token ->
+                    children.forEach { (id, name) -> reportParentFcmToken(context, id, token, name) }
+                }
+        }
+    }
+
     /** Parent: observe the child's last-seen heartbeat. */
     fun listenHeartbeat(
         context: Context,
