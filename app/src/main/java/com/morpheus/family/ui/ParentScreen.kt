@@ -1,7 +1,9 @@
 package com.morpheus.family.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,14 +24,18 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -244,7 +250,8 @@ private fun ParentDashboard(
 
         val fmt = remember { SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()) }
 
-        // Alerts (tamper / SOS / geofence).
+        // Alerts (tamper / SOS / geofence). Swipe sideways to dismiss — the alert
+        // is also cleared in Firestore so it does not re-appear on the next sync.
         children.forEach { child ->
             alerts[child.id]?.let { (type, at) ->
                 val what = when (type) {
@@ -256,14 +263,42 @@ private fun ParentDashboard(
                     "protection_removed" -> "⛔ a proteção foi REMOVIDA neste aparelho!"
                     else -> "evento de segurança"
                 }
-                Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(
-                            "⚠️ ${child.name}: $what",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                        Text("Em ${fmt.format(Date(at))}", style = MaterialTheme.typography.bodySmall)
+                // Key on (child, at) so a NEW alert gets a fresh, undismissed state.
+                key(child.id, at) {
+                    val dismissState = rememberSwipeToDismissBoxState(
+                        confirmValueChange = { value ->
+                            if (value != SwipeToDismissBoxValue.Settled) {
+                                alerts.remove(child.id)
+                                RemoteRepository.clearAlert(context, child.id)
+                                true
+                            } else {
+                                false
+                            }
+                        },
+                    )
+                    SwipeToDismissBox(
+                        state = dismissState,
+                        backgroundContent = {
+                            Box(
+                                Modifier.fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .padding(horizontal = 20.dp),
+                                contentAlignment = Alignment.CenterEnd,
+                            ) {
+                                Text("Dispensar 🗑️", style = MaterialTheme.typography.bodyMedium)
+                            }
+                        },
+                    ) {
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(16.dp)) {
+                                Text(
+                                    "⚠️ ${child.name}: $what",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                                Text("Em ${fmt.format(Date(at))}", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
                     }
                 }
             }

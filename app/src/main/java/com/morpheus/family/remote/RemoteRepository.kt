@@ -257,8 +257,15 @@ object RemoteRepository {
         return listen(context, pairId) { snap ->
             val type = snap.getString("alert")
             val at = snap.getLong("alertAt") ?: 0L
-            if (type != null) onAlert(type, at)
+            // Only surface a live alert. at == 0 means it was dismissed/cleared,
+            // so it must not re-appear on the next unrelated snapshot.
+            if (type != null && at > 0L) onAlert(type, at)
         }
+    }
+
+    /** Parent: dismiss a handled alert so it stops re-appearing (swipe-to-remove). */
+    fun clearAlert(context: Context, pairId: String) {
+        write(context, pairId, mapOf("alertAt" to 0L))
     }
 
     // ---- Child -> parent requests (extra time / unlock) -----------------------
