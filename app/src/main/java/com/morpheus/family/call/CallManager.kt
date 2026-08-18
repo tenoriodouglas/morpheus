@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.webrtc.IceCandidate
+import org.webrtc.PeerConnection
 import org.webrtc.SessionDescription
 
 /**
@@ -50,6 +51,9 @@ object CallManager {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var client: WebRtcClient? = null
+    // Optional TURN relay, read from the family doc (turnUrl/turnUser/turnCred).
+    // Empty until configured; STUN-only until then.
+    private var turnServers: List<PeerConnection.IceServer> = emptyList()
     private var iAmCaller = false
     private var remoteReady = false
     private var handledCallAt = 0L
@@ -84,6 +88,20 @@ object CallManager {
     }
 
     private fun onSnapshot(snap: DocumentSnapshot) {
+        // Pick up an optional TURN relay whenever the doc carries one (independent
+        // of any active call), so the next call can use it.
+        val turnUrl = snap.getString("turnUrl")
+        turnServers = if (turnUrl.isNullOrBlank()) {
+            emptyList()
+        } else {
+            listOf(
+                PeerConnection.IceServer.builder(turnUrl)
+                    .setUsername(snap.getString("turnUser") ?: "")
+                    .setPassword(snap.getString("turnCred") ?: "")
+                    .createIceServer(),
+            )
+        }
+
         val from = snap.getString("callFrom") ?: return
         val status = snap.getString("callStatus") ?: ""
         val callAt = snap.getLong("callAt") ?: 0L
@@ -150,6 +168,7 @@ object CallManager {
             onLocalIce = { c -> appendIce("callOfferIce", c) },
             onConnected = { _ui.value = _ui.value.copy(state = State.ACTIVE) },
             onClosed = { endLocal(writeEnded = true) },
+            extraIceServers = turnServers,
         )
         val now = System.currentTimeMillis()
         handledCallAt = now
@@ -180,6 +199,7 @@ object CallManager {
             onLocalIce = { c -> appendIce("callAnswerIce", c) },
             onConnected = { _ui.value = _ui.value.copy(state = State.ACTIVE) },
             onClosed = { endLocal(writeEnded = true) },
+            extraIceServers = turnServers,
         )
         client?.setRemoteDescription(SessionDescription(SessionDescription.Type.OFFER, offer))
         remoteReady = true

@@ -26,10 +26,14 @@ class WebRtcClient(
     private val onLocalIce: (IceCandidate) -> Unit,
     private val onConnected: () -> Unit,
     private val onClosed: () -> Unit,
+    extraIceServers: List<PeerConnection.IceServer> = emptyList(),
 ) {
     private val factory: PeerConnectionFactory
     private var pc: PeerConnection? = null
     private var localAudioTrack: AudioTrack? = null
+    // STUN discovers a public path on most Wi-Fi; TURN (when configured) relays
+    // media on restrictive mobile/CGNAT networks where STUN alone can't connect.
+    private val iceServers: List<PeerConnection.IceServer> = ICE_SERVERS + extraIceServers
 
     init {
         ensureInit(appContext)
@@ -41,7 +45,7 @@ class WebRtcClient(
     }
 
     private fun createPeerConnection() {
-        val cfg = PeerConnection.RTCConfiguration(ICE_SERVERS).apply {
+        val cfg = PeerConnection.RTCConfiguration(iceServers).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
         }
         pc = factory.createPeerConnection(cfg, object : PeerConnection.Observer {
