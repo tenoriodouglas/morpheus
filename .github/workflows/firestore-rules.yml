@@ -54,4 +54,5 @@ jobs:
           fi
           firebase deploy --only firestore:rules \
             --project "$FIREBASE_PROJECT_ID" \
-            --non-interactive
+            --non-interactive \
+            --debug
