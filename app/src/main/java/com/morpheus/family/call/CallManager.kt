@@ -8,9 +8,14 @@ import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import com.morpheus.family.remote.RemoteRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.webrtc.IceCandidate
 import org.webrtc.SessionDescription
 
@@ -41,6 +46,8 @@ object CallManager {
     private var role: String = ""          // "parent" or "child"
     private var peerName: String = ""
     private var listener: ListenerRegistration? = null
+    private var bindJob: Job? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var client: WebRtcClient? = null
     private var iAmCaller = false
@@ -63,11 +70,16 @@ object CallManager {
         this.pairId = pairId
         this.role = role
         this.peerName = peer
-        RemoteRepository.ensureSignedIn(context)
         if (pairId.isBlank()) return
-        listener = doc().addSnapshotListener { snap, err ->
-            if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
-            onSnapshot(snap)
+        // Attach the signaling listener only AFTER anonymous sign-in completes.
+        // Attaching it while unauthenticated hits PERMISSION_DENIED and Firestore
+        // tears the listener down for good, silently killing the call channel.
+        bindJob = scope.launch {
+            if (!RemoteRepository.awaitSignedIn(context)) return@launch
+            listener = doc().addSnapshotListener { snap, err ->
+                if (err != null || snap == null || !snap.exists()) return@addSnapshotListener
+                onSnapshot(snap)
+            }
         }
     }
 
@@ -213,6 +225,8 @@ object CallManager {
     }
 
     private fun unbindListenerOnly() {
+        bindJob?.cancel()
+        bindJob = null
         runCatching { listener?.remove() }
         listener = null
     }

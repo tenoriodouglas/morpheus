@@ -97,6 +97,15 @@ object RemoteRepository {
         scope.launch { awaitSignIn() }
     }
 
+    /**
+     * Await anonymous sign-in, for callers (e.g. the call channel) that must
+     * attach their own Firestore listener only *after* auth — a listener attached
+     * while unauthenticated hits PERMISSION_DENIED and is torn down permanently.
+     * Returns false if Firebase isn't configured or sign-in failed.
+     */
+    suspend fun awaitSignedIn(context: Context): Boolean =
+        available(context) && awaitSignIn()
+
     /** Merge [data] into the family doc once authenticated. Fire-and-forget. */
     private fun write(context: Context, pairId: String, data: Map<String, Any>) {
         if (!available(context) || pairId.isBlank()) return
