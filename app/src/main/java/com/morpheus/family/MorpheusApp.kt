@@ -41,10 +41,22 @@ class MorpheusApp : Application() {
             description = getString(R.string.channel_alerts_desc)
         }
         nm.createNotificationChannel(alerts)
+
+        // Incoming calls: max importance so it rings/heads-up even from a killed
+        // app, and can show a full-screen intent.
+        val calls = NotificationChannel(
+            CHANNEL_CALLS,
+            getString(R.string.channel_calls_name),
+            NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = getString(R.string.channel_calls_desc)
+        }
+        nm.createNotificationChannel(calls)
     }
 
     companion object {
         const val CHANNEL_STATUS = "morpheus_status"
         const val CHANNEL_ALERTS = "morpheus_alerts"
+        const val CHANNEL_CALLS = "morpheus_calls"
     }
 }

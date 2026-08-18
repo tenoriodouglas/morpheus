@@ -4,6 +4,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.morpheus.family.data.AppMode
 import com.morpheus.family.data.Prefs
+import com.morpheus.family.notify.CallNotifications
 import com.morpheus.family.notify.ParentNotifications
 import com.morpheus.family.schedule.ScheduleEnforcer
 import kotlinx.coroutines.runBlocking
@@ -16,6 +17,23 @@ import kotlinx.coroutines.runBlocking
 class MorpheusMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
+        // Incoming call from the peer (works even with the app closed): ring, and
+        // opening the app shows the in-app accept/decline screen.
+        when (message.data["notifyType"]) {
+            "incoming_call" -> {
+                CallNotifications.postIncoming(
+                    applicationContext,
+                    message.data["caller"] ?: "",
+                    message.data["video"] == "true",
+                )
+                return
+            }
+            "call_cancelled" -> {
+                CallNotifications.cancel(applicationContext)
+                return
+            }
+        }
+
         // Parent-bound alert (SOS / request) from the Cloud Function: show it as a
         // dismissible system notification even if the parent app is closed.
         when (message.data["notifyType"]) {

@@ -24,6 +24,9 @@
          status that Google Play policy requires for monitoring apps. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Show an incoming call as a full-screen notification even from a killed app. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
     <!-- Per-app daily limits: read foreground time. Granted via Settings
          (Usage access), not a runtime prompt. -->
     <uses-permission

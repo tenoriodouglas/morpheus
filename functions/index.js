@@ -39,6 +39,42 @@ exports.onFamilyChange = onDocumentWritten("families/{childId}", async (event) =
     }
   }
 
+  // 3) Ring the CALLEE on an incoming call (works with their app closed), and
+  //    clear the ring once it's answered or cancelled. The callee is whoever the
+  //    call did NOT come from.
+  {
+    const from = after.callFrom;
+    const calleeToken = from === "parent" ? after.childFcmToken : after.parentFcmToken;
+    const callerName = from === "parent" ? "Responsável" : (after.childName || "Filho");
+    const wasRinging = (before.callStatus || "") === "ringing";
+    const isRinging = (after.callStatus || "") === "ringing";
+    const newRing = isRinging && (after.callAt || 0) > (before.callAt || 0);
+    if (calleeToken && from) {
+      try {
+        if (newRing) {
+          await getMessaging().send({
+            token: calleeToken,
+            data: {
+              notifyType: "incoming_call",
+              caller: String(callerName),
+              video: String(Boolean(after.callVideo)),
+            },
+            android: { priority: "high" },
+          });
+        } else if (wasRinging && !isRinging) {
+          // Answered / ended / declined -> stop the ring on the callee.
+          await getMessaging().send({
+            token: calleeToken,
+            data: { notifyType: "call_cancelled" },
+            android: { priority: "high" },
+          });
+        }
+      } catch (e) {
+        console.error("incoming-call push failed:", e?.message || e);
+      }
+    }
+  }
+
   // 2) Alert the PARENT when the child raises an SOS/alert or asks for more time,
   //    so the parent is notified even if its app is closed. childName is written
   //    by the parent onto the doc; fall back to a generic label.

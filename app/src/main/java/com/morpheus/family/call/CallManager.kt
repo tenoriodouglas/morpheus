@@ -1,6 +1,7 @@
 package com.morpheus.family.call
 
 import android.content.Context
+import android.media.AudioManager
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.ListenerRegistration
@@ -42,6 +43,7 @@ object CallManager {
         val muted: Boolean = false,
         val video: Boolean = false,
         val cameraOn: Boolean = true,
+        val speakerOn: Boolean = false,
     )
 
     private val _ui = MutableStateFlow(CallUi())
@@ -69,6 +71,7 @@ object CallManager {
     // Optional TURN relay, read from the family doc (turnUrl/turnUser/turnCred).
     // Empty until configured; STUN-only until then.
     private var turnServers: List<PeerConnection.IceServer> = emptyList()
+    private var audioManager: AudioManager? = null
     private var iAmCaller = false
     private var remoteReady = false
     private var handledCallAt = 0L
@@ -179,7 +182,8 @@ object CallManager {
         remoteReady = false
         answerIceConsumed = 0
         offerIceConsumed = 0
-        _ui.value = CallUi(State.OUTGOING, peerName, video = video)
+        _ui.value = CallUi(State.OUTGOING, peerName, video = video, speakerOn = video)
+        startAudio(context, speaker = video)
         client = WebRtcClient(
             context.applicationContext,
             onLocalIce = { c -> appendIce("callOfferIce", c) },
@@ -218,6 +222,7 @@ object CallManager {
         iAmCaller = false
         offerIceConsumed = 0
         val video = pendingVideo
+        startAudio(context, speaker = video)
         client = WebRtcClient(
             context.applicationContext,
             onLocalIce = { c -> appendIce("callAnswerIce", c) },
@@ -232,7 +237,7 @@ object CallManager {
         }
         client?.setRemoteDescription(SessionDescription(SessionDescription.Type.OFFER, offer))
         remoteReady = true
-        _ui.value = CallUi(State.ACTIVE, peerName, video = video)
+        _ui.value = CallUi(State.ACTIVE, peerName, video = video, speakerOn = video)
         client?.createAnswer { sdp ->
             doc().set(
                 mapOf("callAnswer" to sdp.description, "callStatus" to "active"),
@@ -245,6 +250,31 @@ object CallManager {
         val m = !_ui.value.muted
         client?.setMuted(m)
         _ui.value = _ui.value.copy(muted = m)
+    }
+
+    /** Route call audio to the loudspeaker or back to the earpiece. */
+    fun toggleSpeaker() {
+        val on = !_ui.value.speakerOn
+        runCatching { audioManager?.isSpeakerphoneOn = on }
+        _ui.value = _ui.value.copy(speakerOn = on)
+    }
+
+    /** Put the audio system into call mode; video calls default to loudspeaker. */
+    private fun startAudio(context: Context, speaker: Boolean) {
+        val am = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        audioManager = am
+        runCatching {
+            am?.mode = AudioManager.MODE_IN_COMMUNICATION
+            am?.isSpeakerphoneOn = speaker
+        }
+    }
+
+    private fun resetAudio() {
+        runCatching {
+            audioManager?.isSpeakerphoneOn = false
+            audioManager?.mode = AudioManager.MODE_NORMAL
+        }
+        audioManager = null
     }
 
     /** Video call: turn the local camera on/off. */
@@ -283,6 +313,7 @@ object CallManager {
         remoteReady = false
         pendingOffer = null
         pendingVideo = false
+        resetAudio()
         // Clear the UI FIRST so Compose detaches and releases the SurfaceViewRenderers
         // (they render into the client's EglBase). Only THEN — a frame later — tear
         // down the peer connection, tracks and EglBase. Releasing the GL context while

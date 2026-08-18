@@ -83,6 +83,7 @@ fun CallHost() {
                         .height(150.dp)
                         .clip(RoundedCornerShape(12.dp)),
                     mirror = true,
+                    overlay = true,
                 )
             }
 
@@ -161,12 +162,18 @@ private fun CallControls(ui: CallManager.CallUi, onAccept: () -> Unit) {
                     contentColor = MaterialTheme.colorScheme.onTertiary,
                 ) { Text(if (ui.muted) "🔊 Ativar mic" else "🔇 Mudo") }
                 PixelButton(
-                    onClick = { CallManager.hangup() },
+                    onClick = { CallManager.toggleSpeaker() },
                     modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.error,
-                    contentColor = MaterialTheme.colorScheme.onError,
-                ) { Text("📴 Encerrar") }
+                    color = MaterialTheme.colorScheme.tertiary,
+                    contentColor = MaterialTheme.colorScheme.onTertiary,
+                ) { Text(if (ui.speakerOn) "🔈 Fone" else "🔊 Viva-voz") }
             }
+            PixelButton(
+                onClick = { CallManager.hangup() },
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.error,
+                contentColor = MaterialTheme.colorScheme.onError,
+            ) { Text("📴 Encerrar") }
         }
         else -> PixelButton(
             onClick = { CallManager.hangup() },
@@ -184,19 +191,28 @@ private fun statusText(ui: CallManager.CallUi): String = when (ui.state) {
     else -> ""
 }
 
-/** Renders a WebRTC [VideoTrack] into a SurfaceViewRenderer, releasing on dispose. */
+/**
+ * Renders a WebRTC [VideoTrack] into a SurfaceViewRenderer, releasing on dispose.
+ * [overlay] must be true for the small picture-in-picture self-view: two
+ * overlapping SurfaceViews otherwise composite in the wrong order and the local
+ * preview disappears behind the full-screen remote view (notably on older
+ * Android). setZOrderMediaOverlay(true) lifts it above.
+ */
 @Composable
 private fun VideoRenderer(
     track: VideoTrack?,
     eglContext: EglBase.Context?,
     modifier: Modifier = Modifier,
     mirror: Boolean = false,
+    overlay: Boolean = false,
 ) {
     if (track == null || eglContext == null) return
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
             SurfaceViewRenderer(ctx).apply {
+                // Must be set before the surface is created (before init()).
+                if (overlay) setZOrderMediaOverlay(true)
                 init(eglContext, null)
                 setMirror(mirror)
                 setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)

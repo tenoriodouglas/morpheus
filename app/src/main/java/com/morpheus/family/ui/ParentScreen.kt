@@ -111,6 +111,26 @@ private fun ParentHome(prefs: Prefs) {
     // a new SOS/alert or request from ANY child raises a system notification — the
     // in-app banners themselves live in the family menu (dashboard).
     val remoteAvailable = remember { RemoteRepository.available(context) }
+
+    // Ask for notification permission (Android 13+) and publish this parent's FCM
+    // token onto every paired child's doc, so the backend can push SOS/request
+    // alerts AND incoming-call rings back to the parent even with the app closed.
+    // Lives here (always mounted), not in the now-secondary family menu.
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {}
+    LaunchedEffect(children, remoteAvailable) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (remoteAvailable && children.isNotEmpty()) {
+            RemoteRepository.uploadParentFcmToken(context, children.associate { it.id to it.name })
+        }
+    }
+
     val seenAlert = remember { mutableMapOf<String, Long>() }
     val seenReq = remember { mutableMapOf<String, Long>() }
     DisposableEffect(children, remoteAvailable) {
@@ -199,24 +219,6 @@ private fun ParentDashboard(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val remoteAvailable = remember { RemoteRepository.available(context) }
-
-    // Receive SOS/request pushes even when the parent app is closed: ask for
-    // notification permission (Android 13+) and publish this device's FCM token
-    // onto every paired child's doc so the backend can reach it.
-    val notifPermLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) {}
-    LaunchedEffect(children, remoteAvailable) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        if (remoteAvailable && children.isNotEmpty()) {
-            RemoteRepository.uploadParentFcmToken(context, children.associate { it.id to it.name })
-        }
-    }
 
     var codeInput by remember { mutableStateOf("") }
     var nameInput by remember { mutableStateOf("") }
