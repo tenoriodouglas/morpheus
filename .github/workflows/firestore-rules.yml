@@ -1,16 +1,20 @@
 name: Deploy Firestore Rules
 
 # Publishes firestore.rules to your Firebase project. Run it manually from the
-# Actions tab (or it runs automatically when firestore.rules changes on the
-# default branch).
+# Actions tab (or it runs automatically when firestore.rules changes).
 #
 # One-time setup (only you can do this — the credential never touches chat):
-#   1. On your machine:  npm i -g firebase-tools && firebase login:ci
-#      Copy the token it prints.
+#   1. Firebase Console -> Project settings (gear) -> "Service accounts" tab ->
+#      "Generate new private key". A JSON file downloads.
 #   2. GitHub repo -> Settings -> Secrets and variables -> Actions -> New secret
-#      Name: FIREBASE_TOKEN   Value: <the token>
+#      Name: FIREBASE_SERVICE_ACCOUNT
+#      Value: paste the ENTIRE contents of that JSON file.
 #   The project id is read from the existing GOOGLE_SERVICES_JSON_BASE64 secret,
 #   so no extra project secret is needed.
+#
+# Why a service account (not FIREBASE_TOKEN): the `firebase login:ci` token flow
+# is deprecated and now fails token refresh (HTTP 400) on current firebase-tools.
+# Service-account auth via GOOGLE_APPLICATION_CREDENTIALS is the supported path.
 
 on:
   workflow_dispatch:
@@ -44,15 +48,19 @@ jobs:
           echo "Resolved Firebase project id: $PROJECT_ID"
           echo "FIREBASE_PROJECT_ID=$PROJECT_ID" >> "$GITHUB_ENV"
 
-      - name: Deploy rules
+      - name: Write service account key
         env:
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
-          if [ -z "$FIREBASE_TOKEN" ]; then
-            echo "::error::FIREBASE_TOKEN secret is not set. Create it with 'firebase login:ci' and add it under repo Settings -> Secrets -> Actions."
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT secret is not set. Firebase Console -> Project settings -> Service accounts -> Generate new private key, then paste the JSON into a repo secret named FIREBASE_SERVICE_ACCOUNT."
             exit 1
           fi
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      - name: Deploy rules
+        run: |
           firebase deploy --only firestore:rules \
             --project "$FIREBASE_PROJECT_ID" \
-            --non-interactive \
-            --debug
+            --non-interactive
