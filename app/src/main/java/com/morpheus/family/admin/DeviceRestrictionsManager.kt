@@ -34,9 +34,9 @@ object DeviceRestrictionsManager {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             toggle(dpm, admin, UserManager.DISALLOW_USER_SWITCH, true)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            toggle(dpm, admin, UserManager.DISALLOW_ADD_CLONE_PROFILE, true)
-        }
+        // Newer Android also allows blocking cloned-app profiles; the restriction
+        // key is stable even where the SDK constant isn't exposed.
+        toggle(dpm, admin, "no_add_clone_profile", true)
 
         // Content filtering: force a family-safe DNS-over-TLS host globally.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
