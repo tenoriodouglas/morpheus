@@ -63,7 +63,7 @@ class MainActivity : ComponentActivity() {
                         val mode by prefs.modeFlow.collectAsState(initial = AppMode.UNSET)
                         when (mode) {
                             AppMode.UNSET -> ModeSelectionScreen(prefs)
-                            AppMode.CHILD -> ChildGate(prefs)
+                            AppMode.CHILD -> ChildScreen(prefs)
                             AppMode.PARENT -> ParentScreen(prefs)
                         }
 

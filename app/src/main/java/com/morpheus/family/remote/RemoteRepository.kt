@@ -290,6 +290,23 @@ object RemoteRepository {
         write(context, pairId, mapOf("alertAt" to 0L))
     }
 
+    /** Parent: mark this family as linked to a parent (called when the parent opens
+     *  the child's control panel), so the child can hide its pairing QR. */
+    fun markParentLinked(context: Context, pairId: String) {
+        write(context, pairId, mapOf("parentLinked" to true))
+    }
+
+    /** Child: observe whether a parent has connected to this device. */
+    fun listenParentLinked(
+        context: Context,
+        pairId: String,
+        onLinked: (Boolean) -> Unit,
+    ): ListenerRegistration? {
+        return listen(context, pairId) { snap ->
+            onLinked(snap.getBoolean("parentLinked") == true)
+        }
+    }
+
     // ---- Child -> parent requests (extra time / unlock) -----------------------
 
     fun reportRequest(context: Context, pairId: String, type: String, note: String, at: Long) {

@@ -701,9 +701,11 @@ private fun ChildScheduleEditor(
 
     val snackbar = remember { SnackbarHostState() }
 
-    // Bind the call channel to this child so we can call / receive from them.
+    // Bind the call channel to this child, and mark the family as parent-linked so
+    // the child hides its pairing QR now that a parent is connected.
     LaunchedEffect(child.id) {
         com.morpheus.family.call.CallManager.bind(context, child.id, "parent", child.name)
+        RemoteRepository.markParentLinked(context, child.id)
     }
 
     fun persist(newSchedule: Schedule, toast: String? = null) {

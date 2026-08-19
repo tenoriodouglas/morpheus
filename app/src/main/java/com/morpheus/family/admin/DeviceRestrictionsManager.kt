@@ -25,6 +25,19 @@ object DeviceRestrictionsManager {
         toggle(dpm, admin, UserManager.DISALLOW_DEBUGGING_FEATURES, restrictions.blockDevOptions)
         runCatching { dpm.setAutoTimeRequired(admin, restrictions.requireAutoTime) }
 
+        // Block a "second space" / secondary user / work or clone profile — a common
+        // way to run apps in an unmanaged space and dodge all enforcement. Always on
+        // for a Device Owner child device. (OEM-proprietary spaces like Xiaomi's
+        // "Second space" or Samsung "Secure Folder" may not honour these AOSP flags.)
+        toggle(dpm, admin, UserManager.DISALLOW_ADD_USER, true)
+        toggle(dpm, admin, UserManager.DISALLOW_ADD_MANAGED_PROFILE, true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            toggle(dpm, admin, UserManager.DISALLOW_USER_SWITCH, true)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            toggle(dpm, admin, UserManager.DISALLOW_ADD_CLONE_PROFILE, true)
+        }
+
         // Content filtering: force a family-safe DNS-over-TLS host globally.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             runCatching {

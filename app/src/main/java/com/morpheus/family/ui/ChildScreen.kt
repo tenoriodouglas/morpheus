@@ -45,10 +45,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.text.input.KeyboardType
 import com.morpheus.family.time.TrustedTimeProvider
 import com.morpheus.family.util.Totp
 import androidx.compose.ui.Alignment
@@ -97,7 +94,6 @@ fun ChildScreen(prefs: Prefs) {
     val pairId by prefs.pairedIdFlow.collectAsState(initial = null)
     val schedule by prefs.scheduleFlow.collectAsState(initial = null)
     val appPolicy by prefs.appPolicyFlow.collectAsState(initial = AppPolicy())
-    val parentPin by prefs.parentPinFlow.collectAsState(initial = null)
     var showRemove by remember { mutableStateOf(false) }
     // Location is opt-in and gated behind a prominent disclosure (Play policy).
     var showLocationDisclosure by remember { mutableStateOf(false) }
@@ -199,6 +195,18 @@ fun ChildScreen(prefs: Prefs) {
     val snackbar = remember { SnackbarHostState() }
     val remoteReady = remember(refresh) { RemoteRepository.available(context) }
 
+    // Once a parent is connected, the pairing QR is no longer needed on the home.
+    var parentLinked by remember { mutableStateOf(false) }
+    DisposableEffect(pairId, remoteReady) {
+        val id = pairId
+        val reg = if (remoteReady && !id.isNullOrBlank()) {
+            RemoteRepository.listenParentLinked(context, id) { parentLinked = it }
+        } else {
+            null
+        }
+        onDispose { reg?.remove() }
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         containerColor = MaterialTheme.colorScheme.background,
@@ -214,7 +222,7 @@ fun ChildScreen(prefs: Prefs) {
 
             if (!allRequiredDone && currentStep != null) {
                 WizardCard(currentStep, requiredDone, required.size)
-                PairingCard(pairId)
+                if (!parentLinked) PairingCard(pairId)
             } else {
                 HappyProtectedCard()
                 LiveBlockCard(schedule, appPolicy)
@@ -248,7 +256,7 @@ fun ChildScreen(prefs: Prefs) {
                         com.morpheus.family.call.CallManager.startCall(context, video = true)
                     }
                 }
-                PairingCard(pairId)
+                if (!parentLinked) PairingCard(pairId)
                 if (optional.any { it.done != true }) {
                     Text("Extras (se quiser) ✨", style = MaterialTheme.typography.titleMedium)
                     optional.forEach { OptionalRow(it) }
@@ -292,7 +300,7 @@ fun ChildScreen(prefs: Prefs) {
 
     if (showRemove) {
         RemoveProtectionDialog(
-            expectedPinHash = parentPin,
+            policy = appPolicy,
             onDismiss = { showRemove = false },
             onConfirmed = {
                 ProtectionManager.release(context)
@@ -358,10 +366,15 @@ private fun RemoveProtectionCard(onClick: () -> Unit) {
 
 @Composable
 private fun RemoveProtectionDialog(
-    expectedPinHash: String?,
+    policy: AppPolicy,
     onDismiss: () -> Unit,
     onConfirmed: () -> Unit,
 ) {
+    val context = LocalContext.current
+    // Removing protection (the only step gated by a code) requires the parent's
+    // code: the rotating code shown on the parent's phone, or the fixed emergency
+    // PIN. If the parent configured neither, removal is allowed without a code.
+    val guarded = policy.lockSecret.isNotBlank() || policy.lockFixedPinHash.isNotBlank()
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
     AlertDialog(
@@ -374,22 +387,26 @@ private fun RemoveProtectionDialog(
                         "desinstalar o app em Configurações → Apps → Morpheus.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
-                if (expectedPinHash != null) {
+                if (guarded) {
                     OutlinedTextField(
                         value = pin,
-                        onValueChange = { pin = it.filter(Char::isDigit); error = false },
-                        label = { Text("PIN do responsável") },
+                        onValueChange = { pin = it.filter(Char::isDigit).take(8); error = false },
+                        label = { Text("Código do responsável") },
                         singleLine = true,
                         isError = error,
                     )
-                    if (error) Text("PIN incorreto", color = MaterialTheme.colorScheme.error)
+                    if (error) Text("Código incorreto", color = MaterialTheme.colorScheme.error)
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                if (expectedPinHash == null || Pin.hash(pin) == expectedPinHash) onConfirmed()
-                else error = true
+                // Trusted time resists the child moving the device clock.
+                val now = TrustedTimeProvider.now(context).millis
+                val ok = !guarded ||
+                    (policy.lockSecret.isNotBlank() && Totp.valid(policy.lockSecret, pin, now, skewSteps = 2)) ||
+                    (policy.lockFixedPinHash.isNotBlank() && Pin.hash(pin) == policy.lockFixedPinHash)
+                if (ok) onConfirmed() else error = true
             }) { Text("Remover proteção") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
@@ -632,72 +649,3 @@ private fun batteryIntent(context: Context): Intent =
     Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
         .setData(Uri.parse("package:${context.packageName}"))
 
-/**
- * App-open lock for the child device: when the parent enables it, opening the app
- * requires the rotating code (shown on the parent's phone) or the fixed emergency
- * PIN. The icon stays visible and the managed-device notice stays on — this only
- * stops the child from opening the app to tamper with it. Unlock lasts for the
- * current session (re-locks when the app is reopened).
- */
-@Composable
-fun ChildGate(prefs: Prefs) {
-    val appPolicy by prefs.appPolicyFlow.collectAsState(initial = AppPolicy())
-    var unlocked by rememberSaveable { mutableStateOf(false) }
-    val locked = appPolicy.lockEnabled &&
-        (appPolicy.lockSecret.isNotBlank() || appPolicy.lockFixedPinHash.isNotBlank())
-    if (locked && !unlocked) {
-        ChildLockScreen(appPolicy, onUnlock = { unlocked = true })
-    } else {
-        ChildScreen(prefs)
-    }
-}
-
-@Composable
-private fun ChildLockScreen(policy: AppPolicy, onUnlock: () -> Unit) {
-    val context = LocalContext.current
-    var code by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf(false) }
-
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { pad ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(pad).arcadeGrid().padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text("🔒", fontSize = 56.sp)
-            Spacer(Modifier.height(12.dp))
-            Text("App protegido", style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Peça o código ao responsável para abrir.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(20.dp))
-            OutlinedTextField(
-                value = code,
-                onValueChange = { code = it.filter(Char::isDigit).take(8); error = false },
-                label = { Text("Código") },
-                singleLine = true,
-                isError = error,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            )
-            if (error) {
-                Spacer(Modifier.height(6.dp))
-                Text("Código incorreto", color = MaterialTheme.colorScheme.error)
-            }
-            Spacer(Modifier.height(20.dp))
-            PixelButton(
-                onClick = {
-                    // Trusted time resists the child moving the device clock.
-                    val now = TrustedTimeProvider.now(context).millis
-                    val ok = Totp.valid(policy.lockSecret, code, now, skewSteps = 2) ||
-                        (policy.lockFixedPinHash.isNotBlank() && Pin.hash(code) == policy.lockFixedPinHash)
-                    if (ok) onUnlock() else { error = true; code = "" }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Entrar") }
-        }
-    }
-}
