@@ -1,0 +1,71 @@
+name: Deploy Cloud Functions
+
+# Deploys the Morpheus Cloud Function (functions/), which powers everything that
+# must reach a device whose app is CLOSED:
+#   - immediate block/unblock wake-up to the child,
+#   - SOS / "more time" alerts to the parent,
+#   - incoming-call ring to the callee.
+# Without this deployed, those only work while the app is open.
+#
+# Requires the Firebase BLAZE plan (Cloud Functions need it) and the same
+# FIREBASE_SERVICE_ACCOUNT secret used by the Firestore-rules workflow. The
+# service account needs permission to deploy functions (Editor works, or the
+# specific Cloud Functions Admin + Service Account User + Cloud Build + Artifact
+# Registry roles).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    paths:
+      - "functions/**"
+      - "firebase.json"
+      - ".github/workflows/functions-deploy.yml"
+
+jobs:
+  deploy-functions:
+    name: Deploy Cloud Functions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Install function dependencies
+        run: npm install --prefix functions
+
+      - name: Resolve project id from google-services.json
+        env:
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "::error::GOOGLE_SERVICES_JSON_BASE64 secret is not set; cannot resolve the Firebase project id."
+            exit 1
+          fi
+          echo "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > /tmp/google-services.json
+          PROJECT_ID=$(node -e "console.log(require('/tmp/google-services.json').project_info.project_id)")
+          echo "Resolved Firebase project id: $PROJECT_ID"
+          echo "FIREBASE_PROJECT_ID=$PROJECT_ID" >> "$GITHUB_ENV"
+
+      - name: Write service account key
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT secret is not set (create it as in the Firestore-rules workflow)."
+            exit 1
+          fi
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/sa.json" >> "$GITHUB_ENV"
+
+      - name: Deploy functions
+        run: |
+          firebase deploy --only functions \
+            --project "$FIREBASE_PROJECT_ID" \
+            --non-interactive --force
