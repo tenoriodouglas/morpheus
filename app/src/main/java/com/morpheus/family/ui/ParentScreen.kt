@@ -55,6 +55,9 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.google.firebase.firestore.ListenerRegistration
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -715,14 +718,20 @@ private fun ChildScheduleEditor(
         RemoteRepository.markParentLinked(context, child.id)
     }
 
-    // While this panel is open, wake the child (via FCM) to publish fresh status on
-    // a short cadence, so "using now" stays live even if its background service was
-    // killed by battery optimizations. Stops when the parent leaves the panel.
+    // While this panel is open AND the parent app is in the foreground, wake the
+    // child (via FCM) to publish fresh status on a short cadence, so "using now"
+    // stays near-live even if its background service was killed by battery
+    // optimizations. repeatOnLifecycle(RESUMED) cancels the loop the instant the
+    // parent app is backgrounded, so no writes happen while nobody is watching —
+    // the child's own 60s ticker remains the baseline for that case.
     if (remoteAvailable) {
-        LaunchedEffect(child.id) {
-            while (true) {
-                RemoteRepository.requestStatusRefresh(context, child.id)
-                kotlinx.coroutines.delay(45_000)
+        val lifecycleOwner = LocalLifecycleOwner.current
+        LaunchedEffect(child.id, lifecycleOwner) {
+            lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                while (true) {
+                    RemoteRepository.requestStatusRefresh(context, child.id)
+                    kotlinx.coroutines.delay(6_000)
+                }
             }
         }
     }
