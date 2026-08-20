@@ -464,7 +464,12 @@ private fun ParentDashboard(
         }
 
         SecurityPinCard(prefs)
-        DeviceOwnerSetupCard(prefs)
+        // Device Owner ("Modo máximo") is intentionally not surfaced: it requires a
+        // full factory reset of the child device (Android only allows Device Owner on
+        // a device with no accounts), which isn't practical for a phone already in use.
+        // The provisioning code (DeviceOwnerSetupCard / DeviceOwnerProvisioning) is kept
+        // intact so this can be re-enabled by restoring the call below.
+        // DeviceOwnerSetupCard(prefs)
 
         Text(
             if (children.isEmpty()) "Nenhum filho conectado ainda."
