@@ -248,6 +248,13 @@ object ScheduleEnforcer {
         // the online heartbeat.
         RemoteRepository.reportStatus(context, pairId, ChildStatus.encode(status), now)
 
+        // Let the parent see whether max protection (Device Owner) is actually active.
+        runCatching {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE)
+                as android.app.admin.DevicePolicyManager
+            RemoteRepository.reportDeviceOwner(context, pairId, dpm.isDeviceOwnerApp(context.packageName))
+        }
+
         // Location is far more expensive than the rest of the snapshot, so it
         // rides a slower cadence instead of every tick.
         if (now - lastLocationReport >= LOCATION_INTERVAL_MS) {

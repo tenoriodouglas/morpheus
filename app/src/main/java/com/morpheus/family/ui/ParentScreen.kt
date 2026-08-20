@@ -754,6 +754,8 @@ private fun ChildScheduleEditor(
             }
         }
 
+        if (remoteAvailable) DeviceOwnerStatusCard(child.id)
+
         // ---- 👀 O que está acontecendo agora ----
         SectionHeader("👀 Agora")
         ChildMonitorCard(child)
@@ -952,6 +954,54 @@ private fun SetFixedPinDialog(
             }
         },
     )
+}
+
+/**
+ * Shows whether the child device is a Device Owner, i.e. whether max protection
+ * (block second space / uninstall / developer options) is actually enforceable.
+ * Reported by the child; hidden until the first report arrives.
+ */
+@Composable
+private fun DeviceOwnerStatusCard(childId: String) {
+    val context = LocalContext.current
+    var owner by remember(childId) { mutableStateOf<Boolean?>(null) }
+    DisposableEffect(childId) {
+        val reg = RemoteRepository.listenDeviceOwner(context, childId) { owner = it }
+        onDispose { reg?.remove() }
+    }
+    val o = owner ?: return
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (o) MaterialTheme.colorScheme.secondaryContainer
+            else MaterialTheme.colorScheme.errorContainer,
+            contentColor = if (o) MaterialTheme.colorScheme.onSecondaryContainer
+            else MaterialTheme.colorScheme.onErrorContainer,
+        ),
+    ) {
+        Row(
+            Modifier.padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(if (o) "🛡️" else "⚠️", style = MaterialTheme.typography.titleLarge)
+            Column {
+                Text(
+                    if (o) "Proteção máxima ativa" else "Proteção máxima NÃO ativa",
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    if (o) {
+                        "Segundo espaço, desinstalação e opções de desenvolvedor estão bloqueados neste aparelho."
+                    } else {
+                        "Sem o modo Device Owner, o filho pode criar um segundo espaço, desinstalar o app e " +
+                            "ativar as opções de desenvolvedor. Ative em “☰ Família e ajustes → Modo máximo (Device Owner)”."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+    }
 }
 
 /**

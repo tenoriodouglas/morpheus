@@ -63,9 +63,29 @@ fun DeviceOwnerSetupCard(prefs: Prefs) {
 
             if (expanded) {
                 Text(
-                    "Proteção inuninstalável, sem computador. Requer resetar o celular do filho. " +
-                        "Informe a URL do APK assinado (release) para gerar o QR.",
+                    "O modo Device Owner é o único que bloqueia de verdade: segundo espaço, " +
+                        "desinstalação do app e opções de desenvolvedor. Não precisa de computador, " +
+                        "mas exige resetar o celular do filho.",
                     style = MaterialTheme.typography.bodySmall,
+                )
+                Text("Passo a passo:", style = MaterialTheme.typography.titleSmall)
+                listOf(
+                    "1. Abaixo, informe a URL onde o APK assinado (release) está hospedado e gere o QR.",
+                    "2. No celular do filho, faça um reset de fábrica (Configurações → Sistema → Redefinir).",
+                    "3. Ligue o aparelho. Na 1ª tela de boas-vindas (antes de logar em qualquer conta), " +
+                        "toque 6 vezes no mesmo ponto da tela — abre o leitor de QR de configuração.",
+                    "4. Conecte no Wi-Fi se pedir (ou já preencha o Wi-Fi abaixo pra ir no QR).",
+                    "5. Escaneie o QR gerado aqui. O Android baixa e instala o Morpheus já como " +
+                        "Device Owner e conclui a configuração sozinho.",
+                    "6. Pareie normalmente com este app do pai. Pronto — a “Proteção máxima” fica ativa.",
+                ).forEach { step ->
+                    Text(step, style = MaterialTheme.typography.bodySmall)
+                }
+                Text(
+                    "Obs.: em alguns fabricantes (Xiaomi/Samsung), “segundo espaço/pasta segura” " +
+                        "próprios podem não ser bloqueáveis mesmo com Device Owner.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
                     value = apkUrl,

@@ -296,6 +296,22 @@ object RemoteRepository {
         write(context, pairId, mapOf("parentLinked" to true))
     }
 
+    /** Child: report whether this device is a Device Owner, so the parent knows if
+     *  the max-protection restrictions (block second space / uninstall / dev opts)
+     *  are actually in force. */
+    fun reportDeviceOwner(context: Context, pairId: String, isOwner: Boolean) {
+        write(context, pairId, mapOf("deviceOwner" to isOwner))
+    }
+
+    /** Parent: observe the child's Device Owner status (null until first reported). */
+    fun listenDeviceOwner(
+        context: Context,
+        pairId: String,
+        onValue: (Boolean?) -> Unit,
+    ): ListenerRegistration? {
+        return listen(context, pairId) { snap -> onValue(snap.getBoolean("deviceOwner")) }
+    }
+
     /** Child: observe whether a parent has connected to this device. */
     fun listenParentLinked(
         context: Context,
