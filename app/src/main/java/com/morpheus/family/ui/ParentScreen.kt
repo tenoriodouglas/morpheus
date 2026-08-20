@@ -109,6 +109,7 @@ private fun ParentHome(prefs: Prefs) {
     var currentChildId by remember { mutableStateOf<String?>(null) }
     var liveMapChildId by remember { mutableStateOf<String?>(null) }
     var showMenu by remember { mutableStateOf(false) }
+    var showDeviceOwner by remember { mutableStateOf(false) }
 
     // Always-on safety net: whatever screen is showing (including the child panel),
     // a new SOS/alert or request from ANY child raises a system notification — the
@@ -169,6 +170,10 @@ private fun ParentHome(prefs: Prefs) {
     // Home defaults to the first child (control panel); explicit selection wins.
     val current = children.firstOrNull { it.id == currentChildId } ?: children.firstOrNull()
     when {
+        // Dedicated, standalone menu (kept apart from the family/settings dashboard):
+        // the "install on a brand-new phone in Device Owner mode" guide + QR.
+        showDeviceOwner ->
+            DeviceOwnerGuideScreen(prefs, onBack = { showDeviceOwner = false })
         liveMapChild != null ->
             ChildLiveMapScreen(prefs, liveMapChild, onBack = { liveMapChildId = null })
         // No child yet, or the user opened the family menu: show the dashboard.
@@ -177,12 +182,14 @@ private fun ParentHome(prefs: Prefs) {
                 prefs, children,
                 onOpenChild = { currentChildId = it; showMenu = false },
                 onBack = if (children.isEmpty()) null else ({ showMenu = false }),
+                onOpenDeviceOwner = { showDeviceOwner = true },
             )
         else ->
             ChildScheduleEditor(
                 prefs, current,
                 onOpenMenu = { showMenu = true },
                 onOpenLiveMap = { liveMapChildId = it },
+                onOpenDeviceOwner = { showDeviceOwner = true },
             )
     }
 }
@@ -221,6 +228,7 @@ private fun ParentDashboard(
     children: List<ChildRef>,
     onOpenChild: (String) -> Unit,
     onBack: (() -> Unit)? = null,
+    onOpenDeviceOwner: () -> Unit = {},
 ) {
     // When opened as the family menu from a child's panel, back returns there.
     if (onBack != null) BackHandler(onBack = onBack)
@@ -464,12 +472,22 @@ private fun ParentDashboard(
         }
 
         SecurityPinCard(prefs)
-        // Device Owner ("Modo máximo") is intentionally not surfaced: it requires a
-        // full factory reset of the child device (Android only allows Device Owner on
-        // a device with no accounts), which isn't practical for a phone already in use.
-        // The provisioning code (DeviceOwnerSetupCard / DeviceOwnerProvisioning) is kept
-        // intact so this can be re-enabled by restoring the call below.
-        // DeviceOwnerSetupCard(prefs)
+
+        // Entry to the dedicated Device-Owner install guide (its own screen, not part
+        // of these settings). Only relevant for a brand-new / factory-reset phone.
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Instalar em celular novo (Modo máximo)", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Guia passo a passo para instalar o Morpheus como Device Owner num celular " +
+                        "novo ou zerado — o único modo que bloqueia desinstalação e segundo espaço.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedButton(onClick = onOpenDeviceOwner, modifier = Modifier.fillMaxWidth()) {
+                    Text("Abrir guia de celular novo")
+                }
+            }
+        }
 
         Text(
             if (children.isEmpty()) "Nenhum filho conectado ainda."
@@ -703,6 +721,7 @@ private fun ChildScheduleEditor(
     child: ChildRef,
     onOpenMenu: () -> Unit,
     onOpenLiveMap: (String) -> Unit,
+    onOpenDeviceOwner: () -> Unit,
 ) {
     // This is the parent's home screen, so the system back gesture exits the app
     // as usual; the family menu (add/switch child, avisos) is reached via a button.
@@ -767,7 +786,14 @@ private fun ChildScheduleEditor(
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        TextButton(onClick = onOpenMenu) { Text("☰ Família e ajustes") }
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onOpenMenu) { Text("☰ Família e ajustes") }
+            TextButton(onClick = onOpenDeviceOwner) { Text("📱 Celular novo") }
+        }
         Text("Controle de ${child.name}", style = MaterialTheme.typography.headlineMedium)
         Text("Código: ${child.id}", style = MaterialTheme.typography.bodySmall)
 
@@ -1021,7 +1047,8 @@ private fun DeviceOwnerStatusCard(childId: String) {
                         "Segundo espaço, desinstalação e opções de desenvolvedor estão bloqueados neste aparelho."
                     } else {
                         "Sem o modo Device Owner, o filho pode criar um segundo espaço, desinstalar o app e " +
-                            "ativar as opções de desenvolvedor. Ative em “☰ Família e ajustes → Modo máximo (Device Owner)”."
+                            "ativar as opções de desenvolvedor. Para ativar num celular novo/zerado, use o botão " +
+                            "“📱 Celular novo” no topo desta tela."
                     },
                     style = MaterialTheme.typography.bodySmall,
                 )
