@@ -75,6 +75,26 @@ exports.onFamilyChange = onDocumentWritten("families/{childId}", async (event) =
     }
   }
 
+  // 4) Tell the CHILD the parent's answer (approved/denied) to its extra-time
+  //    request, so the feedback arrives even with the child app closed.
+  {
+    const childTok = after.childFcmToken;
+    if (childTok && (after.reqRespAt || 0) > (before.reqRespAt || 0)) {
+      try {
+        await getMessaging().send({
+          token: childTok,
+          data: {
+            notifyType: "req_response",
+            approved: String(Boolean(after.reqRespApproved)),
+          },
+          android: { priority: "high" },
+        });
+      } catch (e) {
+        console.error("req-response push failed:", e?.message || e);
+      }
+    }
+  }
+
   // 2) Alert the PARENT when the child raises an SOS/alert or asks for more time,
   //    so the parent is notified even if its app is closed. childName is written
   //    by the parent onto the doc; fall back to a generic label.

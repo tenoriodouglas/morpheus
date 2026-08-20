@@ -64,6 +64,7 @@ import com.morpheus.family.admin.ProtectionManager
 import com.morpheus.family.data.AppPolicy
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.data.Schedule
+import com.morpheus.family.notify.ChildNotifications
 import com.morpheus.family.enforcement.UsageTracker
 import com.morpheus.family.location.LocationReporter
 import com.morpheus.family.remote.RemoteRepository
@@ -201,6 +202,28 @@ fun ChildScreen(prefs: Prefs) {
         val id = pairId
         val reg = if (remoteReady && !id.isNullOrBlank()) {
             RemoteRepository.listenParentLinked(context, id) { parentLinked = it }
+        } else {
+            null
+        }
+        onDispose { reg?.remove() }
+    }
+
+    // Feedback on an extra-time request: tell the child when the parent answers
+    // (approved/denied), once per answer.
+    DisposableEffect(pairId, remoteReady) {
+        val id = pairId
+        val reg = if (remoteReady && !id.isNullOrBlank()) {
+            RemoteRepository.listenRequestResponse(context, id) { approved, at ->
+                scope.launch {
+                    if (at > prefs.reqRespSeen()) {
+                        prefs.setReqRespSeen(at)
+                        val msg = if (approved) "✅ Pedido aprovado! Você ganhou mais tempo."
+                        else "❌ Pedido de mais tempo recusado."
+                        ChildNotifications.postTransition(context, "Resposta do responsável", msg)
+                        snackbar.showSnackbar(msg)
+                    }
+                }
+            }
         } else {
             null
         }

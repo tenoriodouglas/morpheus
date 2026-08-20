@@ -257,6 +257,7 @@ private fun ParentDashboard(
             val ap = prefs.childAppPolicy(child.id).copy(bonusUntil = extra)
             prefs.setChildAppPolicy(child.id, ap)
             RemoteRepository.pushAppPolicy(context, child.id, ap)
+            RemoteRepository.respondRequest(context, child.id, approved = true, System.currentTimeMillis())
             RemoteRepository.clearRequest(context, child.id)
             requests.remove(child.id)
             snackbar.showSnackbar("✅ +30 min liberados para ${child.name}")
@@ -264,6 +265,7 @@ private fun ParentDashboard(
     }
     fun denyRequest(child: ChildRef) {
         scope.launch {
+            RemoteRepository.respondRequest(context, child.id, approved = false, System.currentTimeMillis())
             RemoteRepository.clearRequest(context, child.id)
             requests.remove(child.id)
             snackbar.showSnackbar("Pedido de ${child.name} recusado")

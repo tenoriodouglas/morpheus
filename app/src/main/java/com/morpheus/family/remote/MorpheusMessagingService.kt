@@ -5,6 +5,7 @@ import com.google.firebase.messaging.RemoteMessage
 import com.morpheus.family.data.AppMode
 import com.morpheus.family.data.Prefs
 import com.morpheus.family.notify.CallNotifications
+import com.morpheus.family.notify.ChildNotifications
 import com.morpheus.family.notify.ParentNotifications
 import com.morpheus.family.schedule.ScheduleEnforcer
 import kotlinx.coroutines.runBlocking
@@ -30,6 +31,16 @@ class MorpheusMessagingService : FirebaseMessagingService() {
             }
             "call_cancelled" -> {
                 CallNotifications.cancel(applicationContext)
+                return
+            }
+            "req_response" -> {
+                val approved = message.data["approved"] == "true"
+                ChildNotifications.postTransition(
+                    applicationContext,
+                    "Resposta do responsável",
+                    if (approved) "✅ Pedido aprovado! Você ganhou mais tempo."
+                    else "❌ Pedido de mais tempo recusado.",
+                )
                 return
             }
         }

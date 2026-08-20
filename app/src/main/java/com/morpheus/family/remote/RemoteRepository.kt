@@ -318,6 +318,24 @@ object RemoteRepository {
         write(context, pairId, mapOf("reqAt" to 0L))
     }
 
+    /** Parent: reply to the child's request so the child gets an explicit
+     *  approved/denied answer (shown as a notification on the child). */
+    fun respondRequest(context: Context, pairId: String, approved: Boolean, at: Long) {
+        write(context, pairId, mapOf("reqRespApproved" to approved, "reqRespAt" to at))
+    }
+
+    /** Child: observe the parent's reply to its extra-time request. */
+    fun listenRequestResponse(
+        context: Context,
+        pairId: String,
+        onResponse: (approved: Boolean, at: Long) -> Unit,
+    ): ListenerRegistration? {
+        return listen(context, pairId) { snap ->
+            val at = snap.getLong("reqRespAt") ?: 0L
+            if (at > 0L) onResponse(snap.getBoolean("reqRespApproved") == true, at)
+        }
+    }
+
     fun listenRequest(
         context: Context,
         pairId: String,

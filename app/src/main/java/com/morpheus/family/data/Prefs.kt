@@ -58,6 +58,7 @@ class Prefs(private val context: Context) {
         // Child side: the allowUntil we last notified about, so an "extra time
         // granted" notice fires once per grant.
         val LAST_ALLOW_NOTIFIED = longPreferencesKey("last_allow_notified")
+        val REQ_RESP_SEEN = longPreferencesKey("req_resp_seen")
 
         // Child side: rolling 24h location history (JSON), mirrored locally so we
         // never have to read it back from Firestore before appending.
@@ -163,6 +164,11 @@ class Prefs(private val context: Context) {
     suspend fun lastAllowNotified(): Long = context.dataStore.data.first()[Keys.LAST_ALLOW_NOTIFIED] ?: 0L
     suspend fun setLastAllowNotified(value: Long) =
         context.dataStore.edit { it[Keys.LAST_ALLOW_NOTIFIED] = value }
+
+    // Child: the request-response timestamp already shown (so approve/deny shows once).
+    suspend fun reqRespSeen(): Long = context.dataStore.data.first()[Keys.REQ_RESP_SEEN] ?: 0L
+    suspend fun setReqRespSeen(value: Long) =
+        context.dataStore.edit { it[Keys.REQ_RESP_SEEN] = value }
 
     // Child rolling 24h location history (JSON).
     suspend fun locationHistory(): LocationHistory =
