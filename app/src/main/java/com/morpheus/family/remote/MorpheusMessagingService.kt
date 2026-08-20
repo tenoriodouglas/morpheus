@@ -43,6 +43,12 @@ class MorpheusMessagingService : FirebaseMessagingService() {
                 )
                 return
             }
+            "refresh_status" -> {
+                // Parent is watching: publish a fresh snapshot now (runs on FCM's
+                // background thread, so blocking briefly is fine — no ANR).
+                runBlocking { runCatching { ScheduleEnforcer.uploadStatus(applicationContext) } }
+                return
+            }
         }
 
         // Parent-bound alert (SOS / request) from the Cloud Function: show it as a

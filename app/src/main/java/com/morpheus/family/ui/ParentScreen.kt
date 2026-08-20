@@ -715,6 +715,18 @@ private fun ChildScheduleEditor(
         RemoteRepository.markParentLinked(context, child.id)
     }
 
+    // While this panel is open, wake the child (via FCM) to publish fresh status on
+    // a short cadence, so "using now" stays live even if its background service was
+    // killed by battery optimizations. Stops when the parent leaves the panel.
+    if (remoteAvailable) {
+        LaunchedEffect(child.id) {
+            while (true) {
+                RemoteRepository.requestStatusRefresh(context, child.id)
+                kotlinx.coroutines.delay(45_000)
+            }
+        }
+    }
+
     fun persist(newSchedule: Schedule, toast: String? = null) {
         scope.launch {
             prefs.setChildSchedule(child.id, newSchedule)
@@ -1442,7 +1454,8 @@ private fun ChildMonitorCard(child: ChildRef) {
                 Text("Agora", style = MaterialTheme.typography.titleMedium)
                 when {
                     status.isStale(now) -> Text(
-                        "Sem dados recentes — o celular pode estar sem internet ou desligado.",
+                        "Atualizando… (se demorar, o celular pode estar sem internet, desligado, " +
+                            "ou o app foi fechado e a economia de bateria pausou o monitoramento).",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     using -> {

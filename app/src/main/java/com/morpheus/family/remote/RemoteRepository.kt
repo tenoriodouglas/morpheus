@@ -296,6 +296,13 @@ object RemoteRepository {
         write(context, pairId, mapOf("parentLinked" to true))
     }
 
+    /** Parent: ask the child to publish a fresh status snapshot now. Bumping this
+     *  makes the Cloud Function wake the child by FCM, so the "using now" view stays
+     *  live even if the child's background service was killed/dozing. */
+    fun requestStatusRefresh(context: Context, pairId: String) {
+        write(context, pairId, mapOf("statusReqAt" to System.currentTimeMillis()))
+    }
+
     /** Child: report whether this device is a Device Owner, so the parent knows if
      *  the max-protection restrictions (block second space / uninstall / dev opts)
      *  are actually in force. */

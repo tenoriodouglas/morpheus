@@ -95,6 +95,24 @@ exports.onFamilyChange = onDocumentWritten("families/{childId}", async (event) =
     }
   }
 
+  // 5) On-demand status refresh: when the parent opens/watches the child panel it
+  //    bumps statusReqAt; wake the child by FCM to publish a fresh snapshot, so the
+  //    "using now" view is live even if the child's background service was killed.
+  {
+    const childTok = after.childFcmToken;
+    if (childTok && (after.statusReqAt || 0) > (before.statusReqAt || 0)) {
+      try {
+        await getMessaging().send({
+          token: childTok,
+          data: { notifyType: "refresh_status" },
+          android: { priority: "high" },
+        });
+      } catch (e) {
+        console.error("status-refresh push failed:", e?.message || e);
+      }
+    }
+  }
+
   // 2) Alert the PARENT when the child raises an SOS/alert or asks for more time,
   //    so the parent is notified even if its app is closed. childName is written
   //    by the parent onto the doc; fall back to a generic label.
