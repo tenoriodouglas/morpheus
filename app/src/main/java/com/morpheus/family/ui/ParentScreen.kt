@@ -131,25 +131,30 @@ private fun ParentHome(prefs: Prefs) {
         }
     }
 
-    val seenAlert = remember { mutableMapOf<String, Long>() }
-    val seenReq = remember { mutableMapOf<String, Long>() }
+    val scope = rememberCoroutineScope()
     DisposableEffect(children, remoteAvailable) {
         val regs = mutableListOf<ListenerRegistration>()
         if (remoteAvailable) {
             children.forEach { child ->
                 RemoteRepository.listenAlert(context, child.id) { type, at ->
-                    if (at > (seenAlert[child.id] ?: 0L)) {
-                        seenAlert[child.id] = at
-                        ParentNotifications.postAlert(
-                            context, child.name,
-                            if (type == "sos") "🆘 SOS — pedido de ajuda!" else "Evento de segurança no aparelho",
-                        )
+                    // Compare against the PERSISTED watermark so a fresh app launch
+                    // doesn't re-notify about an alert already seen last time.
+                    scope.launch {
+                        if (at > prefs.alertNotified(child.id)) {
+                            prefs.setAlertNotified(child.id, at)
+                            ParentNotifications.postAlert(
+                                context, child.name,
+                                if (type == "sos") "🆘 SOS — pedido de ajuda!" else "Evento de segurança no aparelho",
+                            )
+                        }
                     }
                 }?.let { regs.add(it) }
                 RemoteRepository.listenRequest(context, child.id) { _, note, at ->
-                    if (at > (seenReq[child.id] ?: 0L)) {
-                        seenReq[child.id] = at
-                        ParentNotifications.postRequest(context, child.name, note.ifBlank { "Pediu mais tempo" })
+                    scope.launch {
+                        if (at > prefs.reqNotified(child.id)) {
+                            prefs.setReqNotified(child.id, at)
+                            ParentNotifications.postRequest(context, child.name, note.ifBlank { "Pediu mais tempo" })
+                        }
                     }
                 }?.let { regs.add(it) }
             }

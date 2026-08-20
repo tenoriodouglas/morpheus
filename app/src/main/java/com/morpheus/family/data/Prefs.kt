@@ -32,6 +32,12 @@ class Prefs(private val context: Context) {
         fun childSchedule(id: String) = stringPreferencesKey("sched_$id")
         fun childAppPolicy(id: String) = stringPreferencesKey("apppol_$id")
 
+        // Parent side: the latest alert/request timestamp already surfaced to the
+        // parent (as a notification), persisted so reopening the app doesn't
+        // re-notify about events they've already seen.
+        fun childAlertNotified(id: String) = longPreferencesKey("alert_notified_$id")
+        fun childReqNotified(id: String) = longPreferencesKey("req_notified_$id")
+
         // Child side: this device's own app policy (synced from the parent).
         val APP_POLICY = stringPreferencesKey("app_policy")
 
@@ -184,6 +190,17 @@ class Prefs(private val context: Context) {
     }
 
     suspend fun children(): List<ChildRef> = childrenFlow.first()
+
+    // Persisted "already notified" watermark per child, so reopening the parent
+    // app doesn't re-post notifications for alerts/requests already surfaced.
+    suspend fun alertNotified(id: String): Long =
+        context.dataStore.data.first()[Keys.childAlertNotified(id)] ?: 0L
+    suspend fun setAlertNotified(id: String, at: Long) =
+        context.dataStore.edit { it[Keys.childAlertNotified(id)] = at }
+    suspend fun reqNotified(id: String): Long =
+        context.dataStore.data.first()[Keys.childReqNotified(id)] ?: 0L
+    suspend fun setReqNotified(id: String, at: Long) =
+        context.dataStore.edit { it[Keys.childReqNotified(id)] = at }
 
     /** Add or update a child by id (idempotent on id, refreshes the name). */
     suspend fun upsertChild(child: ChildRef) = context.dataStore.edit { p ->
