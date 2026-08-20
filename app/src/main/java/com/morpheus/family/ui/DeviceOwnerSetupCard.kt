@@ -36,11 +36,10 @@ import kotlinx.coroutines.launch
  * Dedicated, standalone screen for installing Morpheus in **Device Owner mode**
  * ("Modo máximo") on a **brand-new or freshly factory-reset** child phone.
  *
- * Kept apart from the family/settings menu on purpose: it is only relevant when
- * setting up a clean device, and it walks the parent through the whole flow —
- * factory reset, the 6-tap gesture on the welcome screen, scanning the QR — plus
- * generates the provisioning QR itself. Reached from its own entry, not buried in
- * the settings dashboard.
+ * Zero-config: the signed-APK URL and its signing checksum come from a published
+ * manifest (see DeviceOwnerProvisioning.fetchManifest), so the provisioning QR is
+ * ready to scan the moment this screen opens — the parent enters nothing. The URL,
+ * checksum and Wi-Fi fields are tucked away as optional extras.
  */
 @Composable
 fun DeviceOwnerGuideScreen(prefs: Prefs, onBack: () -> Unit) {
@@ -53,10 +52,27 @@ fun DeviceOwnerGuideScreen(prefs: Prefs, onBack: () -> Unit) {
     var checksum by remember { mutableStateOf("") }
     var ssid by remember { mutableStateOf("") }
     var pass by remember { mutableStateOf("") }
+    // null = still loading; true = auto-configured from the manifest; false = offline fallback.
+    var autoOk by remember { mutableStateOf<Boolean?>(null) }
+    var showWifi by remember { mutableStateOf(false) }
+    var showAdvanced by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        apkUrl = prefs.deviceOwnerApkUrlFlow.first()
-        if (checksum.isBlank()) checksum = DeviceOwnerProvisioning.signatureChecksum(context)
+        // Pull the fixed signed-APK URL + its signing checksum from the published
+        // manifest so the QR needs no manual input.
+        val manifest = DeviceOwnerProvisioning.fetchManifest()
+        if (manifest != null) {
+            apkUrl = manifest.first
+            checksum = manifest.second
+            autoOk = true
+        } else {
+            // Offline: a saved override if any, else the known default URL; checksum
+            // best-effort from this app's own signature (correct on a release build).
+            apkUrl = prefs.deviceOwnerApkUrlFlow.first()
+                .ifBlank { DeviceOwnerProvisioning.DEFAULT_APK_URL }
+            checksum = DeviceOwnerProvisioning.signatureChecksum(context)
+            autoOk = false
+        }
     }
 
     Scaffold(containerColor = MaterialTheme.colorScheme.background) { padding ->
@@ -111,15 +127,15 @@ fun DeviceOwnerGuideScreen(prefs: Prefs, onBack: () -> Unit) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Passo a passo", style = MaterialTheme.typography.titleMedium)
                     listOf(
-                        "1. Aqui embaixo, informe a URL onde o APK assinado (release) está hospedado " +
-                            "e, se quiser, o Wi-Fi. O QR aparece automaticamente.",
+                        "1. O QR já vem pronto aqui embaixo — você não precisa digitar nada. " +
+                            "(Se o Wi-Fi do local exigir senha, dá para incluí-lo no QR na opção abaixo.)",
                         "2. No celular do filho, faça um RESET DE FÁBRICA " +
                             "(Configurações → Sistema → Opções de redefinição → Apagar todos os dados). " +
                             "Isso apaga o aparelho.",
                         "3. Ligue o celular. Na 1ª tela de boas-vindas (a de escolher idioma, ANTES de " +
                             "entrar em qualquer conta Google), toque 6 VEZES no mesmo ponto da tela. " +
                             "Isso abre o leitor de QR de configuração.",
-                        "4. Se pedir, conecte no Wi-Fi (ou já preencha o Wi-Fi abaixo para o QR fazer isso).",
+                        "4. Se pedir, conecte no Wi-Fi (ou já inclua o Wi-Fi no QR na opção abaixo).",
                         "5. Escaneie o QR gerado aqui. O próprio Android baixa e instala o Morpheus " +
                             "JÁ como Device Owner e conclui a configuração sozinho. Você não instala o " +
                             "app manualmente — o QR faz tudo.",
@@ -137,38 +153,29 @@ fun DeviceOwnerGuideScreen(prefs: Prefs, onBack: () -> Unit) {
                 }
             }
 
-            // ---- QR generator -----------------------------------------------------
+            // ---- The QR, ready to scan (zero input) -------------------------------
             Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Gerar o QR de configuração", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(
-                        value = apkUrl,
-                        onValueChange = { apkUrl = it; scope.launch { prefs.setDeviceOwnerApkUrl(it.trim()) } },
-                        label = { Text("URL do APK assinado (release)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = checksum,
-                        onValueChange = { checksum = it.trim() },
-                        label = { Text("Checksum da assinatura (auto)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = ssid,
-                        onValueChange = { ssid = it },
-                        label = { Text("Wi-Fi SSID (opcional, para baixar o APK)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = pass,
-                        onValueChange = { pass = it },
-                        label = { Text("Wi-Fi senha (opcional)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("QR de configuração", style = MaterialTheme.typography.titleMedium)
+
+                    when (autoOk) {
+                        null -> Text(
+                            "Preparando o QR…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        true -> Text(
+                            "✓ Link e assinatura configurados automaticamente. É só escanear.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        false -> Text(
+                            "Sem internet agora: usando o link padrão. Se o QR não funcionar no " +
+                                "celular do filho, conecte ESTE aparelho à internet e reabra esta tela.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
 
                     if (apkUrl.isNotBlank() && checksum.isNotBlank()) {
                         val payload = remember(apkUrl, checksum, ssid, pass) {
@@ -181,15 +188,52 @@ fun DeviceOwnerGuideScreen(prefs: Prefs, onBack: () -> Unit) {
                         ) {
                             QrCode(payload, sizePx = 700, modifier = Modifier.size(260.dp))
                             Text(
-                                "Escaneie este QR no celular do filho recém-resetado, na tela de " +
-                                    "boas-vindas (toque 6× para abrir o leitor).",
+                                "Escaneie no celular do filho recém-resetado, na tela de boas-vindas " +
+                                    "(toque 6× para abrir o leitor).",
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
-                    } else {
-                        Text(
-                            "Informe a URL do APK assinado para gerar o QR.",
-                            style = MaterialTheme.typography.bodySmall,
+                    }
+
+                    // ---- Optional: bake Wi-Fi into the QR -----------------------------
+                    TextButton(onClick = { showWifi = !showWifi }) {
+                        Text(if (showWifi) "Ocultar Wi-Fi" else "Incluir Wi-Fi no QR (opcional)")
+                    }
+                    if (showWifi) {
+                        OutlinedTextField(
+                            value = ssid,
+                            onValueChange = { ssid = it },
+                            label = { Text("Wi-Fi SSID") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = pass,
+                            onValueChange = { pass = it },
+                            label = { Text("Wi-Fi senha") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    // ---- Optional: manual override (rarely needed) --------------------
+                    TextButton(onClick = { showAdvanced = !showAdvanced }) {
+                        Text(if (showAdvanced) "Ocultar avançado" else "Avançado")
+                    }
+                    if (showAdvanced) {
+                        OutlinedTextField(
+                            value = apkUrl,
+                            onValueChange = { apkUrl = it; scope.launch { prefs.setDeviceOwnerApkUrl(it.trim()) } },
+                            label = { Text("URL do APK assinado (release)") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = checksum,
+                            onValueChange = { checksum = it.trim() },
+                            label = { Text("Checksum da assinatura") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }

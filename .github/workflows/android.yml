@@ -118,6 +118,9 @@ jobs:
     name: Release to Play Store
     needs: build
     runs-on: ubuntu-latest
+    # Needed to publish the signed provisioning APK + manifest to the release.
+    permissions:
+      contents: write
     # Only run for version tags (e.g. v1.0.0) or a manual dispatch.
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     steps:
@@ -183,6 +186,46 @@ jobs:
           name: morpheus-release-aab
           path: app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
+
+      # ---- Device Owner provisioning: a signed release APK at a FIXED URL, plus a
+      # manifest carrying its signing checksum, so the parent app can render the
+      # provisioning QR with zero manual input.
+      - name: Build signed release APK (Device Owner provisioning)
+        env:
+          KEYSTORE_FILE: ${{ runner.temp }}/release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          VERSION_CODE: ${{ github.run_number }}00
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: Stage provisioning APK + manifest
+        run: |
+          set -e
+          mkdir -p provisioning
+          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          [ -z "$APK" ] && { echo "::error::No release APK found"; exit 1; }
+          cp "$APK" provisioning/morpheus-release.apk
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          APKSIGNER=$(find "$SDK/build-tools" -name apksigner | sort | tail -1)
+          echo "Using apksigner: $APKSIGNER"
+          HEX=$("$APKSIGNER" verify --print-certs provisioning/morpheus-release.apk \
+            | grep -m1 -i 'SHA-256 digest' | awk '{print $NF}')
+          echo "cert SHA-256 (hex): $HEX"
+          # Android expects URL-safe base64 (no padding) of the raw cert SHA-256 bytes.
+          CHK=$(python3 -c "import sys,base64,binascii; print(base64.urlsafe_b64encode(binascii.unhexlify(sys.argv[1].replace(':',''))).decode().rstrip('='))" "$HEX")
+          echo "checksum (b64url): $CHK"
+          URL="https://github.com/${{ github.repository }}/releases/download/apk-latest/morpheus-release.apk"
+          printf '{"apkUrl": "%s", "checksum": "%s"}\n' "$URL" "$CHK" > provisioning/provisioning.json
+          cat provisioning/provisioning.json
+
+      - name: Publish provisioning APK + manifest to rolling release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          files: |
+            provisioning/morpheus-release.apk
+            provisioning/provisioning.json
 
       - name: Upload to Google Play
         # Manual test runs don't fail if the app isn't on Play yet; tag releases do.

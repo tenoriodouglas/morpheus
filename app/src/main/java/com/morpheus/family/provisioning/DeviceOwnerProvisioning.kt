@@ -5,8 +5,15 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Base64
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import java.net.HttpURLConnection
+import java.net.URL
 import java.security.MessageDigest
 
 /**
@@ -28,6 +35,40 @@ object DeviceOwnerProvisioning {
     const val PROVISIONING_PACKAGE = "com.morpheus.family"
     private const val ADMIN_RECEIVER_CLASS =
         "com.morpheus.family.admin.MorpheusDeviceAdminReceiver"
+
+    // Fixed, login-free location of the signed release APK used for provisioning,
+    // and a small manifest that pairs that URL with the APK's signing checksum.
+    // Both are published by CI on every Play release (see .github/workflows/android.yml),
+    // so the parent app needs no manual URL/checksum entry.
+    const val DEFAULT_APK_URL =
+        "https://github.com/tenoriodouglas/morpheus/releases/download/apk-latest/morpheus-release.apk"
+    private const val MANIFEST_URL =
+        "https://github.com/tenoriodouglas/morpheus/releases/download/apk-latest/provisioning.json"
+
+    /**
+     * Fetch the published provisioning manifest and return (apkUrl, checksum).
+     * The checksum here is the signing checksum of the exact hosted APK — always
+     * correct regardless of which build (debug/release) the parent app is running,
+     * unlike [signatureChecksum] which reflects the running app's own signature.
+     * Returns null when offline or the manifest is missing/malformed.
+     */
+    suspend fun fetchManifest(): Pair<String, String>? = withContext(Dispatchers.IO) {
+        val body = runCatching {
+            val conn = (URL(MANIFEST_URL).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 8000
+                readTimeout = 8000
+                instanceFollowRedirects = true
+                requestMethod = "GET"
+            }
+            conn.inputStream.bufferedReader().use { it.readText() }
+        }.getOrNull() ?: return@withContext null
+        runCatching {
+            val obj = Json.parseToJsonElement(body).jsonObject
+            val url = obj["apkUrl"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+            val chk = obj["checksum"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+            if (url != null && chk != null) url to chk else null
+        }.getOrNull()
+    }
 
     private const val K_COMPONENT = "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME"
     private const val K_CHECKSUM = "android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM"
