@@ -20,6 +20,11 @@ on:
         default: "draft"
         type: choice
         options: [draft, completed]
+      provisioning_only:
+        description: "Only refresh the signed Device Owner provisioning APK + manifest at the fixed URL; skip uploading to Google Play."
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -228,6 +233,8 @@ jobs:
             provisioning/provisioning.json
 
       - name: Upload to Google Play
+        # Skip entirely when only refreshing the provisioning APK/manifest.
+        if: github.event.inputs.provisioning_only != 'true'
         # Manual test runs don't fail if the app isn't on Play yet; tag releases do.
         continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
         uses: r0adkll/upload-google-play@v1
